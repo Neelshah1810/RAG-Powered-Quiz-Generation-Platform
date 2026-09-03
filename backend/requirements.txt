@@ -1,44 +1,46 @@
 # ============================================================
-# Academix AI — Backend Dependencies
-# Install: pip install -r requirements.txt
+# Academix AI — Backend dependencies
+#
+#   pip install -r requirements.txt
+#
+# Everything here is pure Python or ships a universal wheel, so the API runs on
+# a machine with no C toolchain. The local embedding model is deliberately NOT
+# in this list — see requirements-local-embeddings.txt.
 # ============================================================
 
-# --- Core Framework ---
+# --- Core framework ---
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 python-multipart>=0.0.12
 
-# --- Configuration ---
+# --- Configuration & validation ---
 pydantic>=2.9.0
 pydantic-settings>=2.5.0
+# Required: EmailStr on the login/signup schemas fails to build without it.
 email-validator>=2.0.0
 python-dotenv>=1.0.1
 
-# --- Supabase (DB + Auth + Storage) ---
+# --- Supabase (Postgres + Auth + Storage) ---
 supabase>=2.9.0
 python-jose[cryptography]>=3.3.0
 
-# --- HTTP Client ---
+# --- HTTP client (also used by the Jina embedding provider) ---
 httpx>=0.27.0
 
-# --- LLM (Groq API) ---
+# --- LLM inference ---
 groq>=0.11.0
 
-# --- Embeddings (Local) ---
-sentence-transformers>=3.1.0
-torch>=2.4.0
-
-# --- File Parsing ---
-PyPDF2>=3.0.1
+# --- File parsing (ingestion) ---
+pypdf>=5.0.0
 python-docx>=1.1.0
 python-pptx>=1.0.0
 
-# --- Text Processing ---
-tiktoken>=0.8.0
+# --- PDF export of approved paper sets (PRD §8.2 Stage 7) ---
+fpdf2>=2.8.0
+
 numpy>=1.26.0
 
-# --- DB migrations (scripts/migrate.py) ---
+# --- Migration runner (scripts/migrate.py) ---
+# pg8000 is a pure-Python Postgres driver, chosen over psycopg/asyncpg so
+# migrations run without the MSVC runtime their binary wheels need.
 pg8000>=1.31.0
-
-# --- Testing (optional) ---
-# pytest>=8.0.0

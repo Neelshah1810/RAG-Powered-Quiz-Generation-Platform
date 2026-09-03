@@ -316,6 +316,12 @@ async def reindex_document(
     document = rows[0]
     authz.assert_course_staff(document["course_id"], current_user)
 
+    # Flip to processing immediately so the Classwork badge updates before
+    # the background task has even started.
+    supabase.table("content_documents").update(
+        {"status": "processing", "error_message": None}
+    ).eq("id", document_id).execute()
+
     import asyncio
 
     from app.services.rag.ingestion import ingest_document
@@ -333,7 +339,11 @@ async def reindex_document(
             year=document.get("year"),
         )
     )
-    return {"status": "reindexing", "document_id": document_id}
+    return {
+        "status": "processing",
+        "document_id": document_id,
+        "message": "Re-indexing started. Poll materials until status is indexed or failed.",
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

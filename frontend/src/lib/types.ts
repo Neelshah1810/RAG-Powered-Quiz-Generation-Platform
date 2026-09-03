@@ -82,7 +82,13 @@ export interface Material {
   topic_tag?: string
   created_at: string
   uploader_name?: string
+  document_id?: string
+  source_type?: string
+  exam_type?: string
+  year?: number
   ingestion_status?: string
+  ingestion_error?: string
+  chunk_count?: number
 }
 
 export interface Assignment {

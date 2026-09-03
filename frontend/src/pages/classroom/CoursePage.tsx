@@ -2,16 +2,35 @@
 // Academix AI — Course Page
 // Google Classroom parity: Stream / Classwork / People tabs
 // ============================================================
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/lib/api'
 import type { Course, StreamItem, Material, Assignment, Enrollment } from '@/lib/types'
-import { ArrowLeft, Upload, Plus, FileText, ClipboardList, Users, Clock, Download } from 'lucide-react'
+import { ArrowLeft, Upload, Plus, FileText, ClipboardList, Clock, Download, RefreshCw } from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
 
 type Tab = 'stream' | 'classwork' | 'people'
+
+function statusBadgeClass(status?: string) {
+  if (status === 'indexed') return 'badge-green'
+  if (status === 'failed') return 'badge-red'
+  if (status === 'processing' || status === 'pending') return 'badge-yellow'
+  return 'badge-gray'
+}
+
+function statusLabel(m: Material) {
+  const status = m.ingestion_status || 'not_indexed'
+  if (status === 'indexed') {
+    const n = m.chunk_count || 0
+    return n ? `indexed · ${n} chunks` : 'indexed'
+  }
+  if (status === 'processing') return 'indexing…'
+  if (status === 'pending') return 'queued'
+  if (status === 'failed') return 'failed'
+  return status.replace('_', ' ')
+}
 
 export default function CoursePage() {
   const { courseId } = useParams<{ courseId: string }>()
@@ -24,13 +43,13 @@ export default function CoursePage() {
   const [assignments, setAssignments] = useState<Assignment[]>([])
   const [people, setPeople] = useState<Enrollment[]>([])
   const [loading, setLoading] = useState(true)
+  const [reindexingIds, setReindexingIds] = useState<Record<string, boolean>>({})
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Modal states
   const [showUpload, setShowUpload] = useState(false)
   const [showAssignment, setShowAssignment] = useState(false)
   const [showAnnounce, setShowAnnounce] = useState(false)
 
-  // Form states
   const [announceText, setAnnounceText] = useState('')
   const [assignTitle, setAssignTitle] = useState('')
   const [assignInstructions, setAssignInstructions] = useState('')
@@ -41,6 +60,14 @@ export default function CoursePage() {
   const [uploadSourceType, setUploadSourceType] = useState('notes')
   const [uploadExamType, setUploadExamType] = useState('internal')
   const [uploadYear, setUploadYear] = useState(String(new Date().getFullYear()))
+
+  const refreshMaterials = useCallback(async () => {
+    if (!courseId) return [] as Material[]
+    const { data } = await api.get(`/classroom/${courseId}/materials`)
+    const list = (data || []) as Material[]
+    setMaterials(list)
+    return list
+  }, [courseId])
 
   useEffect(() => {
     if (!courseId) return
@@ -63,6 +90,48 @@ export default function CoursePage() {
     }
     load()
   }, [courseId])
+
+  // Poll while any material is pending/processing (or local reindex in flight)
+  const needsPoll = materials.some(m =>
+    m.ingestion_status === 'pending' || m.ingestion_status === 'processing'
+  ) || Object.keys(reindexingIds).length > 0
+
+  useEffect(() => {
+    if (!needsPoll || !courseId) {
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+      return
+    }
+
+    if (pollRef.current) return
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const list = await refreshMaterials()
+        const stillBusy = list.some(m =>
+          m.ingestion_status === 'pending' || m.ingestion_status === 'processing'
+        )
+        if (!stillBusy) {
+          setReindexingIds({})
+          const failed = list.filter(m => m.ingestion_status === 'failed')
+          if (failed.length) {
+            toast.error(`${failed.length} material(s) failed to index`)
+          } else {
+            toast.success('Material indexing complete')
+          }
+        }
+      } catch { /* keep polling */ }
+    }, 2500)
+
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+    }
+  }, [needsPoll, courseId, refreshMaterials])
 
   const postAnnouncement = async () => {
     if (!announceText.trim()) return
@@ -114,11 +183,10 @@ export default function CoursePage() {
       await api.post(`/classroom/${courseId}/materials`, form, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      toast.success('Material uploaded — RAG ingestion started')
+      toast.success('Uploaded — indexing for RAG started')
       setShowUpload(false)
       setUploadFile(null); setUploadTitle(''); setUploadSourceType('notes')
-      const m = await api.get(`/classroom/${courseId}/materials`)
-      setMaterials(m.data || [])
+      await refreshMaterials()
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Upload failed')
     }
@@ -138,13 +206,42 @@ export default function CoursePage() {
     }
   }
 
+  const reindexMaterial = async (m: Material, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!m.document_id) {
+      toast.error('This material has no RAG document yet — re-upload it')
+      return
+    }
+    setReindexingIds(prev => ({ ...prev, [m.id]: true }))
+    setMaterials(prev => prev.map(row =>
+      row.id === m.id
+        ? { ...row, ingestion_status: 'processing', ingestion_error: undefined }
+        : row
+    ))
+    try {
+      await api.post(`/rag/documents/${m.document_id}/reindex`)
+      toast.success(`Re-indexing “${m.title}”…`)
+      await refreshMaterials()
+    } catch (err: any) {
+      setReindexingIds(prev => {
+        const next = { ...prev }
+        delete next[m.id]
+        return next
+      })
+      toast.error(err.response?.data?.detail || 'Reindex failed')
+      await refreshMaterials()
+    }
+  }
+
   const isTeacher = user?.role === 'teacher' || user?.role === 'admin'
+  const indexingCount = materials.filter(m =>
+    m.ingestion_status === 'pending' || m.ingestion_status === 'processing' || reindexingIds[m.id]
+  ).length
 
   if (loading) return <div className="skeleton" style={{ height: 400, borderRadius: 12 }} />
 
   return (
     <div>
-      {/* Header */}
       <div style={{
         background: course?.banner_color || '#4285F4',
         borderRadius: 12,
@@ -162,7 +259,6 @@ export default function CoursePage() {
         </p>
       </div>
 
-      {/* Tabs */}
       <div className="tabs" style={{ marginBottom: 24 }}>
         {(['stream', 'classwork', 'people'] as Tab[]).map(t => (
           <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}
@@ -170,10 +266,8 @@ export default function CoursePage() {
         ))}
       </div>
 
-      {/* Stream Tab */}
       {tab === 'stream' && (
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
-          {/* Announce box */}
           {isTeacher && (
             <div className="card" style={{ padding: 16, marginBottom: 16 }}>
               {showAnnounce ? (
@@ -234,21 +328,25 @@ export default function CoursePage() {
         </div>
       )}
 
-      {/* Classwork Tab */}
       {tab === 'classwork' && (
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
           {isTeacher && (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
               <button className="btn btn-primary" onClick={() => setShowAssignment(true)}>
                 <Plus size={16} /> Assignment
               </button>
               <button className="btn btn-secondary" onClick={() => setShowUpload(true)}>
                 <Upload size={16} /> Upload Material
               </button>
+              {indexingCount > 0 && (
+                <span className="badge badge-yellow" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <RefreshCw size={12} className="spin" />
+                  Indexing {indexingCount} file{indexingCount === 1 ? '' : 's'}…
+                </span>
+              )}
             </div>
           )}
 
-          {/* Assignments */}
           <h3 style={{ marginBottom: 12 }}>Assignments</h3>
           {assignments.map(a => (
             <div key={a.id} className="card" style={{ padding: 16, marginBottom: 8, cursor: 'pointer' }}
@@ -270,35 +368,61 @@ export default function CoursePage() {
             </div>
           ))}
 
-          {/* Materials */}
           <h3 style={{ margin: '24px 0 12px' }}>Materials</h3>
-          {materials.map(m => (
-            <div key={m.id} className="card" style={{ padding: 16, marginBottom: 8 }}>
-              <div className="flex-between">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <FileText size={20} color="#0F9D58" />
-                  <div>
-                    <div className="font-medium">{m.title}</div>
-                    <div className="text-muted text-small">{m.file_name}</div>
+          {materials.length === 0 && (
+            <p className="text-muted" style={{ marginBottom: 16 }}>No materials uploaded yet</p>
+          )}
+          {materials.map(m => {
+            const busy = Boolean(reindexingIds[m.id])
+              || m.ingestion_status === 'pending'
+              || m.ingestion_status === 'processing'
+            return (
+              <div key={m.id} className="card" style={{ padding: 16, marginBottom: 8 }}>
+                <div className="flex-between" style={{ gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+                    <FileText size={20} color="#0F9D58" />
+                    <div style={{ minWidth: 0 }}>
+                      <div className="font-medium">{m.title}</div>
+                      <div className="text-muted text-small" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {m.file_name}
+                        {m.source_type ? ` · ${m.source_type}` : ''}
+                        {m.source_type === 'pyq' && m.exam_type ? ` (${m.exam_type})` : ''}
+                      </div>
+                      {m.ingestion_status === 'failed' && m.ingestion_error && (
+                        <div className="text-small" style={{ color: 'var(--color-danger)', marginTop: 4 }}>
+                          {m.ingestion_error}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <span
+                      className={`badge ${statusBadgeClass(busy && m.ingestion_status !== 'failed' ? 'processing' : m.ingestion_status)}`}
+                      title={m.ingestion_error || m.ingestion_status || ''}
+                    >
+                      {busy && m.ingestion_status !== 'failed' ? 'indexing…' : statusLabel(m)}
+                    </span>
+                    {isTeacher && m.document_id && (
+                      <button
+                        className="btn btn-ghost btn-icon"
+                        onClick={(e) => reindexMaterial(m, e)}
+                        disabled={busy}
+                        title="Re-index for RAG"
+                      >
+                        <RefreshCw size={18} className={busy ? 'spin' : undefined} />
+                      </button>
+                    )}
+                    <button className="btn btn-ghost btn-icon" onClick={(e) => downloadMaterial(m.id, e)} title="Download">
+                      <Download size={18} />
+                    </button>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  {m.ingestion_status && (
-                    <span className={`badge ${m.ingestion_status === 'indexed' ? 'badge-green' : m.ingestion_status === 'failed' ? 'badge-red' : 'badge-yellow'}`}>
-                      {m.ingestion_status}
-                    </span>
-                  )}
-                  <button className="btn btn-ghost btn-icon" onClick={(e) => downloadMaterial(m.id, e)} title="Download">
-                    <Download size={18} />
-                  </button>
-                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
-      {/* People Tab */}
       {tab === 'people' && (
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
           <h3 style={{ marginBottom: 12 }}>Teachers ({people.filter(p => p.role === 'teacher').length})</h3>
@@ -330,7 +454,6 @@ export default function CoursePage() {
         </div>
       )}
 
-      {/* Upload Material Modal */}
       {showUpload && (
         <div className="modal-overlay" onClick={() => setShowUpload(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -374,7 +497,7 @@ export default function CoursePage() {
                   accept=".pdf,.docx,.pptx,.txt" />
               </div>
               <p className="text-muted text-small">
-                Uploaded materials are automatically processed for AI quiz generation
+                Uploaded materials are automatically indexed for AI quiz generation. Status appears next to each file.
               </p>
             </div>
             <div className="modal-footer">
@@ -387,7 +510,6 @@ export default function CoursePage() {
         </div>
       )}
 
-      {/* Create Assignment Modal */}
       {showAssignment && (
         <div className="modal-overlay" onClick={() => setShowAssignment(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>

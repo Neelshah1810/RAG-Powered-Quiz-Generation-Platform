@@ -346,8 +346,17 @@ ALTER TABLE public.calendar_events
 
 -- One auto-generated due-date event per assignment, so editing an assignment
 -- updates its calendar entry instead of duplicating it.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_events_assignment
-    ON public.calendar_events (assignment_id) WHERE assignment_id IS NOT NULL;
+--
+-- Deliberately NOT a partial index. `ON CONFLICT (assignment_id)` — which is
+-- how scheduler_service upserts the due-date marker — can only infer a
+-- non-partial unique index; against `... WHERE assignment_id IS NOT NULL`
+-- Postgres raises 42P10 "no unique or exclusion constraint matching the ON
+-- CONFLICT specification". The predicate buys nothing anyway: Postgres already
+-- treats NULLs as distinct, so the many hand-created events with a NULL
+-- assignment_id coexist fine under a plain unique index.
+DROP INDEX IF EXISTS public.uq_calendar_events_assignment;
+CREATE UNIQUE INDEX uq_calendar_events_assignment
+    ON public.calendar_events (assignment_id);
 
 -- ============================================================================
 -- 8. Notice Board  (PRD §11)

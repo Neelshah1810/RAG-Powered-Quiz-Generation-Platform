@@ -169,9 +169,14 @@ async def list_materials(course_id: str, topic_tag: Optional[str] = None) -> lis
             or row.pop("content_documents!materials_document_id_fkey", None)
             or {}
         )
-        row["ingestion_status"] = document.get("status") or "not_indexed"
+        # Prefer the FK on materials; fall back to the joined document id.
+        if not row.get("document_id") and document.get("id"):
+            row["document_id"] = document["id"]
+        row["ingestion_status"] = document.get("status") or (
+            "pending" if row.get("document_id") else "not_indexed"
+        )
         row["chunk_count"] = document.get("chunk_count") or 0
-        row["source_type"] = document.get("source_type")
+        row["source_type"] = document.get("source_type") or row.get("source_type")
         row["exam_type"] = document.get("exam_type")
         row["year"] = document.get("year")
         row["ingestion_error"] = document.get("error_message")
