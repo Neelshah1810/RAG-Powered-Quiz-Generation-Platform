@@ -1,41 +1,45 @@
-"""
-Academix AI — Course & Enrollment Models (Pydantic Schemas)
-"""
+"""Academix AI — Course, section and enrollment schemas."""
 
-from pydantic import BaseModel
-from typing import Optional
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Literal, Optional
+
+from pydantic import BaseModel, Field, field_validator
+
+EnrollmentRole = Literal["teacher", "student"]
 
 
-# --- Department ---
-
-class DepartmentCreate(BaseModel):
-    name: str
-    code: str
-
+# ── Department (derived from courses, not a stored entity) ────────────────────
 
 class DepartmentResponse(BaseModel):
     id: str
     name: str
-    code: str
-    created_at: Optional[datetime] = None
+    code: Optional[str] = None
 
 
-# --- Course ---
+# ── Courses ──────────────────────────────────────────────────────────────────
 
 class CourseCreate(BaseModel):
-    name: str
-    code: str
-    department_id: Optional[str] = None
-    semester: Optional[int] = None
+    name: str = Field(min_length=1, max_length=200)
+    code: str = Field(min_length=1, max_length=40)
+    department_name: Optional[str] = None
+    semester: Optional[int] = Field(default=None, ge=1, le=12)
     description: Optional[str] = None
-    banner_color: Optional[str] = "#4285F4"
+    banner_color: Optional[str] = None
+
+    @field_validator("code")
+    @classmethod
+    def _upper(cls, value: str) -> str:
+        return value.strip().upper()
 
 
 class CourseUpdate(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    code: Optional[str] = Field(default=None, min_length=1, max_length=40)
+    department_name: Optional[str] = None
     description: Optional[str] = None
-    semester: Optional[int] = None
+    semester: Optional[int] = Field(default=None, ge=1, le=12)
     banner_color: Optional[str] = None
 
 
@@ -43,23 +47,22 @@ class CourseResponse(BaseModel):
     id: str
     name: str
     code: str
-    department_id: Optional[str] = None
+    department_name: Optional[str] = None
     semester: Optional[int] = None
     description: Optional[str] = None
     banner_color: str = "#4285F4"
     created_by: Optional[str] = None
     created_at: Optional[datetime] = None
-    # Joined data
-    department_name: Optional[str] = None
     teacher_count: Optional[int] = None
     student_count: Optional[int] = None
+    # The requesting user's enrollment role on this course, if any.
+    my_role: Optional[str] = None
 
 
-# --- Section ---
+# ── Sections ─────────────────────────────────────────────────────────────────
 
 class SectionCreate(BaseModel):
-    course_id: str
-    name: str
+    name: str = Field(min_length=1, max_length=60)
 
 
 class SectionResponse(BaseModel):
@@ -69,21 +72,24 @@ class SectionResponse(BaseModel):
     created_at: Optional[datetime] = None
 
 
-# --- Enrollment ---
+# ── Enrollments ──────────────────────────────────────────────────────────────
 
 class EnrollmentCreate(BaseModel):
-    course_id: str
     user_id: str
-    role: str  # 'teacher' | 'student'
+    role: EnrollmentRole
     section_id: Optional[str] = None
 
 
 class BulkEnrollmentCreate(BaseModel):
-    """For enrolling multiple users at once."""
-    course_id: str
-    user_ids: list[str]
-    role: str  # 'teacher' | 'student'
+    user_ids: list[str] = Field(min_length=1)
+    role: EnrollmentRole
     section_id: Optional[str] = None
+
+
+class BulkEnrollmentResult(BaseModel):
+    enrolled: int
+    skipped: int
+    errors: list[str] = Field(default_factory=list)
 
 
 class EnrollmentResponse(BaseModel):
@@ -92,8 +98,10 @@ class EnrollmentResponse(BaseModel):
     user_id: str
     role: str
     section_id: Optional[str] = None
+    section_name: Optional[str] = None
     enrolled_at: Optional[datetime] = None
-    # Joined data
     user_name: Optional[str] = None
     user_email: Optional[str] = None
+    user_avatar: Optional[str] = None
+    user_department: Optional[str] = None
     course_name: Optional[str] = None

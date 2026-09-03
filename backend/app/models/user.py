@@ -1,41 +1,76 @@
-"""
-Academix AI — User Models (Pydantic Schemas)
-"""
+"""Academix AI — User and auth schemas."""
 
-from pydantic import BaseModel, EmailStr
-from typing import Optional
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Literal, Optional
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+Role = Literal["admin", "teacher", "student"]
 
 
-# --- Request Schemas ---
+# ── Requests ─────────────────────────────────────────────────────────────────
 
 class UserCreate(BaseModel):
-    """Schema for creating a new user (admin operation)."""
+    """Provision an account (admin only)."""
+
     email: EmailStr
-    password: str
-    full_name: str
-    role: str  # 'admin' | 'teacher' | 'student'
+    password: str = Field(min_length=8, max_length=128)
+    full_name: str = Field(min_length=1, max_length=200)
+    role: Role
     department: Optional[str] = None
     phone: Optional[str] = None
 
 
+class SignUpRequest(UserCreate):
+    """Alias kept because the frontend posts to /auth/signup."""
+
+    role: Role = "student"
+
+
 class UserUpdate(BaseModel):
-    """Schema for updating user profile."""
-    full_name: Optional[str] = None
+    """Fields a user may change on their own profile."""
+
+    full_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     department: Optional[str] = None
     phone: Optional[str] = None
     avatar_url: Optional[str] = None
 
 
 class UserRoleUpdate(BaseModel):
-    """Schema for updating user role (admin only)."""
-    role: str  # 'admin' | 'teacher' | 'student'
+    role: Role
 
 
-# --- Response Schemas ---
+class PasswordResetRequest(BaseModel):
+    """Admin-set password."""
+
+    password: str = Field(min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+    @field_validator("email")
+    @classmethod
+    def _lower(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class RefreshRequest(BaseModel):
+    """Body-carried refresh token.
+
+    The previous handler took it as a query parameter, which put a credential
+    in the URL — and therefore in access logs and browser history.
+    """
+
+    refresh_token: str
+
+
+# ── Responses ────────────────────────────────────────────────────────────────
 
 class UserResponse(BaseModel):
-    """User profile response."""
     id: str
     email: str
     full_name: str
@@ -46,33 +81,18 @@ class UserResponse(BaseModel):
     created_at: Optional[datetime] = None
 
 
-class UserListResponse(BaseModel):
-    """Paginated user list response."""
-    users: list[UserResponse]
-    total: int
-    page: int
-    page_size: int
-
-
-# --- Auth Schemas ---
-
-class LoginRequest(BaseModel):
-    """Login request."""
-    email: EmailStr
-    password: str
-
-
-class LoginResponse(BaseModel):
-    """Login response with tokens."""
+class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
+    expires_in: Optional[int] = None
+
+
+class LoginResponse(TokenResponse):
     user: UserResponse
 
 
-class SignUpRequest(BaseModel):
-    """Sign-up request (for admin creating users)."""
-    email: EmailStr
-    password: str
-    full_name: str
-    role: str = "student"
-    department: Optional[str] = None
+class UserStats(BaseModel):
+    total: int = 0
+    admins: int = 0
+    teachers: int = 0
+    students: int = 0

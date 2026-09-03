@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react'
 import api from '@/lib/api'
 import type { Course, GeneratedSet, GeneratedQuestion } from '@/lib/types'
+import { formatSourceText } from '@/lib/types'
 import { Sparkles, Send, BookOpen, ChevronDown, ChevronUp, CheckCircle, Edit3, Trash2, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -230,7 +231,11 @@ export default function PaperStylePage() {
                   </button>
                   {expandedSources[q.id] && (
                     <div className="sources-panel" style={{ marginTop: 6 }}>
-                      {q.source_texts.map((src, si) => <div key={si} className="source-chunk">{src}</div>)}
+                      {q.source_texts.map((src, si) => (
+                        <div key={si} className="source-chunk" style={{ whiteSpace: 'pre-wrap' }}>
+                          {formatSourceText(src)}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>

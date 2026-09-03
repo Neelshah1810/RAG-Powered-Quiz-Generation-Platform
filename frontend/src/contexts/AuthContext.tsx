@@ -2,7 +2,8 @@
 // Academix AI — Auth Context
 // Manages authentication state via Supabase Auth
 // ============================================================
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { supabase } from '@/lib/supabase'
 import api from '@/lib/api'
 import type { User } from '@/lib/types'

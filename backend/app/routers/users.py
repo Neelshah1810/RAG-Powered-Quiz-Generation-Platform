@@ -1,28 +1,38 @@
 """
-Academix AI — Users Router
-
-Admin endpoints for user management.
+Academix AI — User management (admin), plus the staff directory.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from __future__ import annotations
+
 from typing import Optional
 
-from app.dependencies import get_current_user, require_role, CurrentUser
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
 from app.database import get_supabase_admin
-from app.models.user import UserResponse, UserRoleUpdate
+from app.dependencies import CurrentUser, get_current_user, require_role
+from app.models.user import (
+    PasswordResetRequest,
+    UserResponse,
+    UserRoleUpdate,
+    UserStats,
+)
+from app.services import auth_service
 
 router = APIRouter()
 
 
 @router.get("/staff", response_model=list[UserResponse])
-async def list_staff(
-    current_user: CurrentUser = Depends(get_current_user),
-):
-    """List all teachers and admins (for meeting invitations). Any authenticated user can access."""
-    supabase = get_supabase_admin()
+async def list_staff(_: CurrentUser = Depends(get_current_user)):
+    """
+    Teachers and admins, for the "meet with" and "lecture by" pickers.
+
+    Readable by any signed-in user: a student booking a meeting needs to pick a
+    teacher. Only name, role and department are exposed — never phone numbers.
+    """
     result = (
-        supabase.table("profiles")
-        .select("*")
+        get_supabase_admin()
+        .table("profiles")
+        .select("id, email, full_name, role, department, avatar_url")
         .in_("role", ["admin", "teacher"])
         .order("full_name")
         .execute()
@@ -32,34 +42,53 @@ async def list_staff(
 
 @router.get("/", response_model=list[UserResponse])
 async def list_users(
-    role: Optional[str] = Query(None, description="Filter by role: admin, teacher, student"),
-    search: Optional[str] = Query(None, description="Search by name or email"),
-    current_user: CurrentUser = Depends(require_role("admin")),
+    role: Optional[str] = Query(None, description="admin | teacher | student"),
+    search: Optional[str] = Query(None, description="Match on name or email"),
+    limit: int = Query(200, ge=1, le=500),
+    _: CurrentUser = Depends(require_role("admin")),
 ):
-    """List all users (admin only). Optionally filter by role or search."""
-    supabase = get_supabase_admin()
-    query = supabase.table("profiles").select("*").order("full_name")
+    """List accounts (admin only)."""
+    query = get_supabase_admin().table("profiles").select("*").order("full_name")
 
     if role:
+        if role not in ("admin", "teacher", "student"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown role {role!r}")
         query = query.eq("role", role)
-    if search:
-        query = query.or_(f"full_name.ilike.%{search}%,email.ilike.%{search}%")
 
-    result = query.execute()
-    return result.data or []
+    if search:
+        # Escape PostgREST's `or` delimiters so a search for "a,b" cannot break
+        # out of the filter expression.
+        needle = search.replace(",", " ").replace("(", " ").replace(")", " ").strip()
+        if needle:
+            query = query.or_(f"full_name.ilike.%{needle}%,email.ilike.%{needle}%")
+
+    return query.limit(limit).execute().data or []
+
+
+@router.get("/stats/summary", response_model=UserStats)
+async def get_user_stats(_: CurrentUser = Depends(require_role("admin"))):
+    """Account counts by role, for the admin dashboard."""
+    result = (
+        get_supabase_admin().table("profiles").select("role").limit(5000).execute()
+    )
+    roles = [row["role"] for row in (result.data or [])]
+    return UserStats(
+        total=len(roles),
+        admins=roles.count("admin"),
+        teachers=roles.count("teacher"),
+        students=roles.count("student"),
+    )
 
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: str,
-    current_user: CurrentUser = Depends(require_role("admin")),
+    _: CurrentUser = Depends(require_role("admin")),
 ):
-    """Get a single user's profile (admin only)."""
-    supabase = get_supabase_admin()
-    result = supabase.table("profiles").select("*").eq("id", user_id).single().execute()
-    if not result.data:
-        raise HTTPException(status_code=404, detail="User not found")
-    return result.data
+    profile = await auth_service.get_user_profile(user_id)
+    if not profile:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    return profile
 
 
 @router.patch("/{user_id}/role", response_model=UserResponse)
@@ -68,49 +97,92 @@ async def update_user_role(
     data: UserRoleUpdate,
     current_user: CurrentUser = Depends(require_role("admin")),
 ):
-    """Update a user's role (admin only)."""
-    if data.role not in ("admin", "teacher", "student"):
-        raise HTTPException(status_code=400, detail="Invalid role")
+    """
+    Change a user's role.
 
-    supabase = get_supabase_admin()
-    result = supabase.table("profiles").update({"role": data.role}).eq("id", user_id).execute()
-    if not result.data:
-        raise HTTPException(status_code=404, detail="User not found")
-    return result.data[0]
+    An admin cannot demote themselves — doing so would immediately revoke the
+    access needed to undo it, and could leave the institute with no admin.
+    """
+    if user_id == current_user.id and data.role != "admin":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "You cannot change your own role. Ask another admin to do it.",
+        )
+    return await auth_service.set_user_role(user_id, data.role)
 
 
-@router.delete("/{user_id}")
+@router.post("/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_user_password(
+    user_id: str,
+    data: PasswordResetRequest,
+    _: CurrentUser = Depends(require_role("admin")),
+):
+    """Set a user's password (admin-assisted reset)."""
+    await auth_service.set_user_password(user_id, data.password)
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: str,
     current_user: CurrentUser = Depends(require_role("admin")),
 ):
-    """Delete a user account (admin only). Also removes from Supabase Auth."""
-    supabase = get_supabase_admin()
+    """
+    Delete an account and everything owned by it.
 
-    # Prevent self-deletion
+    Refused for your own account, and refused if it would remove the last
+    admin — leaving the institute with no way in.
+    """
     if user_id == current_user.id:
-        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "You cannot delete your own account"
+        )
 
-    # Delete from Supabase Auth (cascade deletes profile)
-    supabase.auth.admin.delete_user(user_id)
-    return {"message": "User deleted successfully"}
+    target = await auth_service.get_user_profile(user_id)
+    if not target:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+
+    if target["role"] == "admin":
+        remaining = (
+            get_supabase_admin()
+            .table("profiles")
+            .select("id", count="exact")
+            .eq("role", "admin")
+            .execute()
+        )
+        if (remaining.count or 0) <= 1:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "This is the only admin account. Promote another user first.",
+            )
+
+    await auth_service.delete_user(user_id)
 
 
-@router.get("/stats/summary")
-async def get_user_stats(
-    current_user: CurrentUser = Depends(require_role("admin")),
+@router.get("/{user_id}/courses")
+async def get_user_courses(
+    user_id: str,
+    _: CurrentUser = Depends(require_role("admin")),
 ):
-    """Get user count statistics (admin dashboard)."""
-    supabase = get_supabase_admin()
-
-    total = supabase.table("profiles").select("id", count="exact").execute()
-    admins = supabase.table("profiles").select("id", count="exact").eq("role", "admin").execute()
-    teachers = supabase.table("profiles").select("id", count="exact").eq("role", "teacher").execute()
-    students = supabase.table("profiles").select("id", count="exact").eq("role", "student").execute()
-
-    return {
-        "total": total.count or 0,
-        "admins": admins.count or 0,
-        "teachers": teachers.count or 0,
-        "students": students.count or 0,
-    }
+    """A user's enrollments, so an admin can audit access before changing a role."""
+    result = (
+        get_supabase_admin()
+        .table("enrollments")
+        .select("*, courses(id, name, code, semester)")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    enrollments = []
+    for row in (result.data or []):
+        course = row.pop("courses", None) or {}
+        enrollments.append(
+            {
+                "enrollment_id": row["id"],
+                "course_id": course.get("id"),
+                "course_name": course.get("name"),
+                "course_code": course.get("code"),
+                "semester": course.get("semester"),
+                "role": row["role"],
+                "enrolled_at": row.get("enrolled_at"),
+            }
+        )
+    return enrollments

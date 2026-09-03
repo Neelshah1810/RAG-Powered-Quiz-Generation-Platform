@@ -106,6 +106,7 @@ export interface Submission {
   assignment_id: string
   student_id: string
   file_url?: string
+  file_name?: string
   text_response?: string
   submitted_at: string
   status: 'not_submitted' | 'submitted' | 'late' | 'graded'
@@ -179,6 +180,15 @@ export type QuestionType = 'mcq' | 'short_answer' | 'long_answer' | 'true_false'
 export type BloomLevel = 'remember' | 'understand' | 'apply' | 'analyze' | 'evaluate' | 'create'
 export type GenerationMode = 'quiz_generation' | 'paper_style'
 
+/** Provenance chunk attached to a generated question (NotebookLM-style sources). */
+export interface SourceChunk {
+  text?: string
+  document_name?: string
+  page_ref?: string
+  source_type?: string
+  similarity?: number
+}
+
 export interface GeneratedQuestion {
   id: string
   set_id: string
@@ -190,10 +200,18 @@ export interface GeneratedQuestion {
   marks: number
   bloom_level?: BloomLevel
   source_chunk_ids: string[]
-  source_texts: string[]
+  source_texts: Array<string | SourceChunk>
   faithfulness_score?: number
   teacher_edited: boolean
   question_order: number
+}
+
+/** Format a source entry for display (handles string or structured chunk). */
+export function formatSourceText(src: string | SourceChunk): string {
+  if (typeof src === 'string') return src
+  const header = [src.document_name, src.page_ref].filter(Boolean).join(', ')
+  const body = (src.text || '').trim()
+  return header ? `${header}\n${body}` : body || JSON.stringify(src)
 }
 
 export interface GeneratedSet {

@@ -31,13 +31,16 @@ async def lifespan(app: FastAPI):
     print(f"   Frontend URL: {settings.FRONTEND_URL}")
 
     # Pre-load the embedding model so first request isn't slow
-    try:
-        from app.services.rag.embeddings import get_embedding_model
-        get_embedding_model()
-        print(f"   [+] Embedding model loaded: {settings.EMBEDDING_MODEL}")
-    except Exception as e:
-        print(f"   [!] Embedding model failed to load: {e}")
-        print(f"      RAG features will not work until this is resolved.")
+    if settings.PRELOAD_EMBEDDING_MODEL:
+        try:
+            from app.services.rag.embeddings import get_embedding_model
+            get_embedding_model()
+            print(f"   [+] Embedding model loaded: {settings.EMBEDDING_MODEL}")
+        except Exception as e:
+            print(f"   [!] Embedding model failed to load: {e}")
+            print(f"      RAG features will not work until this is resolved.")
+    else:
+        print("   [=] Embedding preload skipped (PRELOAD_EMBEDDING_MODEL=false)")
 
     yield
 

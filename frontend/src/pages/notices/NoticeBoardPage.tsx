@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/lib/api'
-import type { Notice } from '@/lib/types'
+import type { Course, Notice } from '@/lib/types'
 import { Bell, ClipboardList, Calendar, Award, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
@@ -29,6 +29,7 @@ const typeColors: Record<string, string> = {
 export default function NoticeBoardPage() {
   const { user } = useAuth()
   const [notices, setNotices] = useState<Notice[]>([])
+  const [courses, setCourses] = useState<Course[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [filter, setFilter] = useState<string>('')
   const [loading, setLoading] = useState(true)
@@ -36,10 +37,17 @@ export default function NoticeBoardPage() {
   const [formTitle, setFormTitle] = useState('')
   const [formBody, setFormBody] = useState('')
   const [formType, setFormType] = useState('announcement')
+  const [formCourseId, setFormCourseId] = useState('')
 
   const canPost = user?.role === 'teacher' || user?.role === 'admin'
+  const isAdmin = user?.role === 'admin'
 
   useEffect(() => { loadNotices() }, [filter])
+  useEffect(() => {
+    if (canPost) {
+      api.get('/courses/').then(r => setCourses(r.data || [])).catch(() => {})
+    }
+  }, [canPost])
 
   const loadNotices = async () => {
     setLoading(true)
@@ -65,12 +73,23 @@ export default function NoticeBoardPage() {
 
   const createNotice = async () => {
     if (!formTitle || !formBody) { toast.error('Fill in title and body'); return }
+    if (!isAdmin && !formCourseId) {
+      toast.error('Select a course to post to')
+      return
+    }
     try {
-      await api.post('/notices/', { title: formTitle, body: formBody, notice_type: formType })
+      await api.post('/notices/', {
+        title: formTitle,
+        body: formBody,
+        notice_type: formType,
+        course_id: formCourseId || null,
+      })
       toast.success('Notice posted')
-      setShowCreate(false); setFormTitle(''); setFormBody(''); setFormType('announcement')
+      setShowCreate(false); setFormTitle(''); setFormBody(''); setFormType('announcement'); setFormCourseId('')
       loadNotices()
-    } catch { toast.error('Failed to post notice') }
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to post notice')
+    }
   }
 
   return (
@@ -90,7 +109,6 @@ export default function NoticeBoardPage() {
         </div>
       </div>
 
-      {/* Filters */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
         {['', 'announcement', 'assignment', 'grade', 'event', 'admin'].map(f => (
           <button key={f} className={`badge ${filter === f ? 'badge-blue' : 'badge-gray'}`}
@@ -101,7 +119,6 @@ export default function NoticeBoardPage() {
         ))}
       </div>
 
-      {/* Notices Feed */}
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {[1, 2, 3, 4].map(i => <div key={i} className="skeleton" style={{ height: 80 }} />)}
@@ -152,7 +169,6 @@ export default function NoticeBoardPage() {
         </div>
       )}
 
-      {/* Create Notice Modal */}
       {showCreate && (
         <div className="modal-overlay" onClick={() => setShowCreate(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -161,6 +177,17 @@ export default function NoticeBoardPage() {
               <button className="btn btn-ghost btn-icon" onClick={() => setShowCreate(false)}>✕</button>
             </div>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div className="input-group">
+                <label className="input-label">
+                  {isAdmin ? 'Course (optional — leave blank for institute-wide)' : 'Course'}
+                </label>
+                <select className="input" value={formCourseId} onChange={e => setFormCourseId(e.target.value)}>
+                  <option value="">{isAdmin ? 'Institute-wide' : 'Select a course...'}</option>
+                  {courses.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+                  ))}
+                </select>
+              </div>
               <div className="input-group">
                 <label className="input-label">Title</label>
                 <input className="input" value={formTitle} onChange={e => setFormTitle(e.target.value)} />
@@ -174,7 +201,7 @@ export default function NoticeBoardPage() {
                 <select className="input" value={formType} onChange={e => setFormType(e.target.value)}>
                   <option value="announcement">Announcement</option>
                   <option value="event">Event</option>
-                  <option value="admin">Admin Notice</option>
+                  {isAdmin && <option value="admin">Admin Notice</option>}
                 </select>
               </div>
             </div>

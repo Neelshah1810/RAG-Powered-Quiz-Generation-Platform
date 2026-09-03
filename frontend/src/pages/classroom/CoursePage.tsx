@@ -39,6 +39,8 @@ export default function CoursePage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadTitle, setUploadTitle] = useState('')
   const [uploadSourceType, setUploadSourceType] = useState('notes')
+  const [uploadExamType, setUploadExamType] = useState('internal')
+  const [uploadYear, setUploadYear] = useState(String(new Date().getFullYear()))
 
   useEffect(() => {
     if (!courseId) return
@@ -96,20 +98,30 @@ export default function CoursePage() {
 
   const uploadMaterial = async () => {
     if (!uploadFile || !uploadTitle.trim()) return
+    if (uploadSourceType === 'pyq' && !uploadExamType) {
+      toast.error('Select exam type for PYQ papers')
+      return
+    }
     const form = new FormData()
     form.append('file', uploadFile)
     form.append('title', uploadTitle)
     form.append('source_type', uploadSourceType)
+    if (uploadSourceType === 'pyq') {
+      form.append('exam_type', uploadExamType)
+      if (uploadYear) form.append('year', uploadYear)
+    }
     try {
       await api.post(`/classroom/${courseId}/materials`, form, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
       toast.success('Material uploaded — RAG ingestion started')
       setShowUpload(false)
-      setUploadFile(null); setUploadTitle('')
+      setUploadFile(null); setUploadTitle(''); setUploadSourceType('notes')
       const m = await api.get(`/classroom/${courseId}/materials`)
       setMaterials(m.data || [])
-    } catch { toast.error('Upload failed') }
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Upload failed')
+    }
   }
 
   const downloadMaterial = async (materialId: string, e: React.MouseEvent) => {
@@ -340,13 +352,29 @@ export default function CoursePage() {
                   <option value="pyq">Previous Year Question Paper</option>
                 </select>
               </div>
+              {uploadSourceType === 'pyq' && (
+                <div className="grid-2" style={{ gap: 12 }}>
+                  <div className="input-group">
+                    <label className="input-label">Exam type</label>
+                    <select className="input" value={uploadExamType} onChange={e => setUploadExamType(e.target.value)}>
+                      <option value="internal">Internal</option>
+                      <option value="external">External</option>
+                    </select>
+                  </div>
+                  <div className="input-group">
+                    <label className="input-label">Year</label>
+                    <input className="input" type="number" value={uploadYear}
+                      onChange={e => setUploadYear(e.target.value)} min={1990} max={2100} />
+                  </div>
+                </div>
+              )}
               <div className="input-group">
                 <label className="input-label">File (PDF, DOCX, PPTX, TXT)</label>
                 <input type="file" className="input" onChange={e => setUploadFile(e.target.files?.[0] || null)}
                   accept=".pdf,.docx,.pptx,.txt" />
               </div>
               <p className="text-muted text-small">
-                📌 Uploaded materials are automatically processed for AI quiz generation
+                Uploaded materials are automatically processed for AI quiz generation
               </p>
             </div>
             <div className="modal-footer">

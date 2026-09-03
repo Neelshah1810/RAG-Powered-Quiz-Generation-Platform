@@ -27,6 +27,7 @@ const studentNav = [
 
 const adminNav = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/classroom', label: 'Classroom', icon: BookOpen },
   { to: '/admin/users', label: 'Manage Users', icon: Users },
   { to: '/admin/courses', label: 'Manage Courses', icon: GraduationCap },
   { to: '/scheduler', label: 'Scheduler', icon: Calendar },

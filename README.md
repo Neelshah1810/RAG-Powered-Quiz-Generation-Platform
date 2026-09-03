@@ -11,122 +11,118 @@ A single-institute academic platform with three roles (Admin, Teacher, Student) 
 | Database | Supabase PostgreSQL + pgvector |
 | Auth | Supabase Auth (JWT) |
 | Storage | Supabase Storage |
-| LLM | Groq API |
-| Embeddings | sentence-transformers (local) |
+| LLM | Groq API (`openai/gpt-oss-120b`) |
+| Embeddings | sentence-transformers (local) or hash fallback |
 
 ## Prerequisites
 
 - **Python 3.11+** — [Download](https://python.org)
 - **Node.js 20+** — [Download](https://nodejs.org)
-- **Supabase Account** — [Sign up free](https://supabase.com)
-- **Groq API Key** — [Get one free](https://console.groq.com)
+- **Supabase project** with credentials in `backend/.env` and `frontend/.env`
+- **Groq API Key** — [console.groq.com](https://console.groq.com)
+- **Windows only:** for high-quality local embeddings, install [MSVC VC++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe). Until then the app uses `EMBEDDING_PROVIDER=hash` (works, lower retrieval quality).
 
-## Setup Instructions
+Redis and Celery are **not** required for this setup — ingestion and generation run in-process.
 
-### 1. Supabase Project Setup
+## One-time setup
 
-1. Go to [supabase.com](https://supabase.com) and create a new project
-2. In your project dashboard, go to **SQL Editor**
-3. Copy the contents of `supabase/migrations/001_initial_schema.sql` and run it
-4. Go to **Storage** and create these buckets:
-   - `course-materials` (private)
-   - `pyq-papers` (private)
-   - `submissions` (private)
-   - `avatars` (public)
-5. Note down your project credentials from **Settings → API**:
-   - Project URL
-   - Anon/Public Key
-   - Service Role Key
-   - JWT Secret
-
-### 2. Backend Setup
+### 1. Database
 
 ```bash
 cd backend
-
-# Create virtual environment
 python -m venv venv
-
-# Activate virtual environment
 # Windows:
 venv\Scripts\activate
-# Mac/Linux:
-source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
 
-# Copy env template and fill in your keys
-cp .env.example .env
-# Edit .env with your Supabase and Groq credentials
-
-# Run the server
-uvicorn app.main:app --reload --port 8000
+# Apply schema (needs DATABASE_URL in .env — Session pooler, port 5432)
+python -m scripts.migrate
+python seed_data.py
 ```
 
-The API will be available at `http://localhost:8000`
-API docs at `http://localhost:8000/docs`
+Or paste `supabase/migrations/001_schema.sql` into the Supabase SQL Editor.
 
-### 3. Frontend Setup
+Storage buckets (already created on the pilot project): `course-materials`, `pyq-papers`, `submissions`, `avatars`.
+
+### 2. Environment
+
+Copy and fill:
+
+- `backend/.env` — from `backend/.env.example` (Supabase + Groq + `DATABASE_URL`)
+- `frontend/.env` — from `frontend/.env.example`
+
+Generation model on this Groq key: `openai/gpt-oss-120b` (verify with `openai/gpt-oss-20b`).
+
+### 3. Frontend
 
 ```bash
 cd frontend
-
-# Install dependencies
 npm install
+```
 
-# Copy env template and fill in your keys
-cp .env.example .env
-# Edit .env with your Supabase credentials
+## Run (two terminals)
 
-# Run the dev server
+**Terminal 1 — Backend**
+
+```bash
+cd backend
+venv\Scripts\activate
+# Prefer python -m on Windows if uvicorn.exe is blocked by antivirus:
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+API: http://localhost:8000  
+Docs: http://localhost:8000/docs
+
+**Terminal 2 — Frontend**
+
+```bash
+cd frontend
 npm run dev
 ```
 
-The app will be available at `http://localhost:5173`
+App: http://localhost:5173
 
-## Project Structure
+## Demo accounts
+
+Password for all: `password123`
+
+| Role | Email |
+|---|---|
+| Admin | `admin@academix.ai` |
+| Teacher | `teacher@academix.ai` |
+| Student | `student@academix.ai` |
+
+## How to test
+
+1. **Login** as each role — sidebar nav should match PRD §5.
+2. **Admin** → Manage Users / Manage Courses → enroll teacher + student on a course.
+3. **Teacher** → Classroom → open course → Classwork → Upload Material (notes PDF/TXT). Wait until status shows `indexed`.
+4. **Teacher** → Paper Style → generate an Internal/External draft → edit → Approve.
+5. **Student** → Quiz Generation → same course → generate quiz → answer → Submit (sources panel should show citations).
+6. **Teacher** → create Assignment → **Student** opens it → Turn in → **Teacher** grades.
+7. **Scheduler** / **Notice Board** — create events and course notices (teachers must pick a course).
+
+## Project structure
 
 ```
-├── backend/                    # FastAPI Python backend
+├── backend/                    # FastAPI
 │   ├── app/
-│   │   ├── main.py            # App entry point
-│   │   ├── config.py          # Settings & env vars
-│   │   ├── database.py        # Supabase client
-│   │   ├── dependencies.py    # Auth middleware
-│   │   ├── models/            # Pydantic schemas
-│   │   ├── routers/           # API endpoints
-│   │   ├── services/          # Business logic
-│   │   └── utils/             # Helpers
-│   ├── requirements.txt
-│   └── .env.example
-├── frontend/                   # React Vite app
-│   ├── src/
-│   │   ├── components/        # Reusable components
-│   │   ├── pages/             # Page components
-│   │   ├── hooks/             # Custom hooks
-│   │   ├── contexts/          # React contexts
-│   │   └── lib/               # Utilities
-│   └── .env.example
-├── supabase/
-│   └── migrations/            # Database schema
-└── README.md
+│   │   ├── main.py
+│   │   ├── routers/            # auth, users, courses, classroom, scheduler, notices, rag
+│   │   ├── services/           # business logic + rag/
+│   │   └── models/
+│   ├── scripts/migrate.py      # applies supabase/migrations
+│   └── seed_data.py
+├── frontend/                   # React + Vite
+├── supabase/migrations/        # 001_schema.sql
+└── PRD_RAG_Quiz_Engine.md
 ```
 
-## Demo Accounts
+## Features
 
-You can log in to the platform using the following demo accounts (Password for all accounts is `password123`):
-
-- **Admin**: `admin@academix.ai`
-- **Teacher**: `teacher@academix.ai`
-- **Student**: `student@academix.ai`
-
-## Features (Phase 1)
-
-- ✅ Auth/RBAC for 3 roles (Admin, Teacher, Student)
-- ✅ Classroom (Google Classroom parity: Stream, Materials, Assignments, Submissions, Grading)
-- ✅ Quiz Generation (Student) — RAG-powered practice quizzes
-- ✅ Paper Style (Teacher) — RAG-powered exam draft generation with review/approve
-- ✅ Scheduler (Google Calendar-style native calendar)
-- ✅ Notice Board (in-app notification feed)
-- ✅ Admin panel (User management, Course management)
+- Auth/RBAC for Admin, Teacher, Student
+- Classroom (Stream, Materials + RAG ingest, Assignments, Submissions, Grading)
+- Quiz Generation (Student) and Paper Style (Teacher) on one RAG engine
+- Scheduler and Notice Board with role-based isolation
+- Admin user/course management

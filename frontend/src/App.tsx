@@ -6,12 +6,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider } from '@/contexts/AuthContext'
 import AppShell from '@/components/layout/AppShell'
+import RoleRoute from '@/components/RoleRoute'
 
 // Pages
 import LoginPage from '@/pages/auth/LoginPage'
 import DashboardPage from '@/pages/dashboard/DashboardPage'
 import ClassroomPage from '@/pages/classroom/ClassroomPage'
 import CoursePage from '@/pages/classroom/CoursePage'
+import AssignmentPage from '@/pages/classroom/AssignmentPage'
 import QuizGenerationPage from '@/pages/rag/QuizGenerationPage'
 import PaperStylePage from '@/pages/rag/PaperStylePage'
 import SchedulerPage from '@/pages/scheduler/SchedulerPage'
@@ -39,12 +41,21 @@ export default function App() {
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/classroom" element={<ClassroomPage />} />
               <Route path="/classroom/:courseId" element={<CoursePage />} />
-              <Route path="/quiz" element={<QuizGenerationPage />} />
-              <Route path="/paper-style" element={<PaperStylePage />} />
+              <Route path="/classroom/:courseId/assignment/:assignmentId" element={<AssignmentPage />} />
+              <Route path="/quiz" element={
+                <RoleRoute roles={['student']}><QuizGenerationPage /></RoleRoute>
+              } />
+              <Route path="/paper-style" element={
+                <RoleRoute roles={['teacher', 'admin']}><PaperStylePage /></RoleRoute>
+              } />
               <Route path="/scheduler" element={<SchedulerPage />} />
               <Route path="/notices" element={<NoticeBoardPage />} />
-              <Route path="/admin/users" element={<ManageUsersPage />} />
-              <Route path="/admin/courses" element={<ManageCoursesPage />} />
+              <Route path="/admin/users" element={
+                <RoleRoute roles={['admin']}><ManageUsersPage /></RoleRoute>
+              } />
+              <Route path="/admin/courses" element={
+                <RoleRoute roles={['admin']}><ManageCoursesPage /></RoleRoute>
+              } />
             </Route>
 
             {/* Fallback */}
