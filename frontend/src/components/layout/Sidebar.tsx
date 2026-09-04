@@ -73,7 +73,7 @@ export default function Sidebar() {
         gap: '12px'
       }}>
         <div className="avatar" style={{ width: 32, height: 32, fontSize: 12 }}>
-          {user?.full_name?.charAt(0) || '?'}
+          {user?.full_name ? user.full_name.trim().charAt(0).toUpperCase() : (user?.email ? user.email.trim().charAt(0).toUpperCase() : 'U')}
         </div>
         <div style={{ overflow: 'hidden', flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

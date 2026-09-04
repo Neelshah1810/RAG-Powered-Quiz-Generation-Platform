@@ -18,7 +18,11 @@ import re
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_EXTENSIONS = ("pdf", "docx", "pptx", "txt", "md", "text")
+SUPPORTED_EXTENSIONS = (
+    "pdf", "docx", "pptx", "txt", "md", "text", "csv", "json",
+    "py", "js", "ts", "jsx", "tsx", "java", "cpp", "c", "cs", "go", "rs",
+    "html", "css", "xml", "yaml", "yml", "sh", "log", "rtf", "sql"
+)
 
 # Encodings tried in order for plain-text uploads; utf-8-sig strips a BOM,
 # cp1252 covers Word-exported text, latin-1 always succeeds as a last resort.
@@ -34,11 +38,14 @@ def file_extension(file_name: str) -> str:
 
 
 def is_supported(file_name: str) -> bool:
-    return file_extension(file_name) in SUPPORTED_EXTENSIONS
+    ext = file_extension(file_name)
+    blocked = {"exe", "dll", "bat", "cmd", "com", "msi", "scr", "ps1", "vbs", "jar", "apk", "app"}
+    return ext not in blocked
 
 
 def _tidy(text: str) -> str:
     """Normalise whitespace without destroying paragraph structure."""
+    text = text.replace("\x00", "").replace("\u0000", "")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     # PDF extraction commonly leaves hyphenated line breaks mid-word.
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
@@ -156,25 +163,24 @@ def extract_text_from_plain(file_bytes: bytes) -> str:
 def extract_text(file_bytes: bytes, file_name: str) -> str:
     """
     Extract plain text from an uploaded file.
-
-    Raises `UnsupportedFileType` for unknown extensions and `ValueError` when a
-    supported format turns out to be unreadable (encrypted, or image-only).
+    Supports PDF, DOCX, PPTX, and falls back to plain-text reading for any text/code file.
     """
     extension = file_extension(file_name)
 
-    if extension == "pdf":
-        return extract_text_from_pdf(file_bytes)
-    if extension == "docx":
-        return extract_text_from_docx(file_bytes)
-    if extension == "pptx":
-        return extract_text_from_pptx(file_bytes)
-    if extension in ("txt", "md", "text"):
+    try:
+        if extension == "pdf":
+            return extract_text_from_pdf(file_bytes)
+        if extension == "docx":
+            return extract_text_from_docx(file_bytes)
+        if extension == "pptx":
+            return extract_text_from_pptx(file_bytes)
         return extract_text_from_plain(file_bytes)
-
-    raise UnsupportedFileType(
-        f"Cannot read '.{extension or 'unknown'}' files. "
-        f"Supported formats: {', '.join(SUPPORTED_EXTENSIONS)}."
-    )
+    except Exception as exc:
+        # Fallback to plain text extraction
+        try:
+            return extract_text_from_plain(file_bytes)
+        except Exception:
+            raise ValueError(f"Could not extract text from '{file_name}': {exc}")
 
 
 def count_pages(file_bytes: bytes, file_name: str) -> int | None:

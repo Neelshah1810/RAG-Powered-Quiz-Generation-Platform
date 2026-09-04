@@ -73,6 +73,24 @@ def get_client():
     return _client
 
 
+GROQ_FALLBACK_MODELS = [
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-70b-versatile",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+]
+
+
+def _is_model_not_found_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(marker in msg for marker in ("model_not_found", "does not exist", "not have access to it", "invalid_request_error", "404"))
+
+
 def complete_text(
     *,
     system: str,
@@ -82,13 +100,10 @@ def complete_text(
     max_tokens: int = 2048,
 ) -> str:
     """
-    Plain-text chat completion (no JSON mode).
-
-    Used by the student Quiz Generation chat tutor, where the reply is
-    conversational prose grounded in retrieved course material.
+    Plain-text chat completion (no JSON mode) with automatic fallback for deprecated/missing models.
     """
     settings = get_settings()
-    model = model or settings.GROQ_VERIFY_MODEL or settings.GROQ_MODEL
+    requested_model = model or settings.GROQ_VERIFY_MODEL or settings.GROQ_MODEL
     client = get_client()
 
     messages = [
@@ -96,37 +111,42 @@ def complete_text(
         {"role": "user", "content": user},
     ]
 
-    attempts = max(1, settings.GROQ_MAX_RETRIES + 1)
+    candidate_models = [requested_model] + [m for m in GROQ_FALLBACK_MODELS if m != requested_model]
     last_error: Exception | None = None
 
-    for attempt in range(1, attempts + 1):
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            content = (response.choices[0].message.content or "").strip()
-            if not content:
-                raise LLMError("Model returned an empty response")
-            return content
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            if attempt < attempts and _is_retryable(exc):
-                backoff = 1.5 * attempt
-                logger.warning(
-                    "Groq text call failed (attempt %d/%d): %s — retrying in %.1fs",
-                    attempt,
-                    attempts,
-                    str(exc)[:200],
-                    backoff,
+    for target_model in candidate_models:
+        attempts = max(1, settings.GROQ_MAX_RETRIES + 1)
+        for attempt in range(1, attempts + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=target_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
                 )
-                time.sleep(backoff)
-                continue
-            break
+                content = (response.choices[0].message.content or "").strip()
+                if not content:
+                    raise LLMError("Model returned an empty response")
+                return content
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if _is_model_not_found_error(exc):
+                    logger.warning("Model %s unavailable on Groq: %s — trying fallback model.", target_model, exc)
+                    break  # Break inner attempt loop to try next model candidate
+                if attempt < attempts and _is_retryable(exc):
+                    backoff = 1.5 * attempt
+                    logger.warning(
+                        "Groq text call failed (attempt %d/%d): %s — retrying in %.1fs",
+                        attempt,
+                        attempts,
+                        str(exc)[:200],
+                        backoff,
+                    )
+                    time.sleep(backoff)
+                    continue
+                break
 
-    raise LLMError(f"Groq text request to {model} failed: {last_error}") from last_error
+    raise LLMError(f"Groq text request to {requested_model} failed: {last_error}") from last_error
 
 
 def complete(
@@ -147,7 +167,7 @@ def complete(
     once rather than failing the request outright.
     """
     settings = get_settings()
-    model = model or settings.GROQ_MODEL
+    requested_model = model or settings.GROQ_MODEL
     client = get_client()
 
     messages = [
@@ -155,72 +175,76 @@ def complete(
         {"role": "user", "content": user},
     ]
 
-    if json_schema is not None:
-        response_format: dict[str, Any] = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": schema_name,
-                "strict": True,
-                "schema": json_schema,
-            },
-        }
-    else:
-        response_format = {"type": "json_object"}
-
-    attempts = max(1, settings.GROQ_MAX_RETRIES + 1)
+    candidate_models = [requested_model] + [m for m in GROQ_FALLBACK_MODELS if m != requested_model]
     last_error: Exception | None = None
-    schema_downgraded = False
 
-    for attempt in range(1, attempts + 1):
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                response_format=response_format,
-            )
-            content = (response.choices[0].message.content or "").strip()
-            if not content:
-                raise LLMError("Model returned an empty response")
-            return content
+    for target_model in candidate_models:
+        if json_schema is not None:
+            response_format: dict[str, Any] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_name,
+                    "strict": True,
+                    "schema": json_schema,
+                },
+            }
+        else:
+            response_format = {"type": "json_object"}
 
-        except Exception as exc:  # noqa: BLE001 — provider raises many types
-            last_error = exc
-            message = str(exc)
+        attempts = max(1, settings.GROQ_MAX_RETRIES + 1)
+        schema_downgraded = False
 
-            # Some models accept json_object but not strict json_schema. Try
-            # once without the schema before giving up on the call.
-            if (
-                not schema_downgraded
-                and json_schema is not None
-                and ("json_schema" in message or "response_format" in message)
-            ):
-                logger.warning(
-                    "Model %s rejected strict json_schema (%s); retrying in "
-                    "schema-free JSON mode.",
-                    model,
-                    message[:160],
+        for attempt in range(1, attempts + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=target_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_format=response_format,
                 )
-                response_format = {"type": "json_object"}
-                schema_downgraded = True
-                continue
+                content = (response.choices[0].message.content or "").strip()
+                if not content:
+                    raise LLMError("Model returned an empty response")
+                return content
 
-            if attempt < attempts and _is_retryable(exc):
-                backoff = 1.5 * attempt
-                logger.warning(
-                    "Groq call failed (attempt %d/%d): %s — retrying in %.1fs",
-                    attempt,
-                    attempts,
-                    message[:200],
-                    backoff,
-                )
-                time.sleep(backoff)
-                continue
+            except Exception as exc:  # noqa: BLE001 — provider raises many types
+                last_error = exc
+                message = str(exc)
 
-            break
+                if _is_model_not_found_error(exc):
+                    logger.warning("Model %s unavailable on Groq (%s) — trying fallback model.", target_model, message[:160])
+                    break
 
-    raise LLMError(f"Groq request to {model} failed: {last_error}") from last_error
+                if (
+                    not schema_downgraded
+                    and json_schema is not None
+                    and ("json_schema" in message or "response_format" in message)
+                ):
+                    logger.warning(
+                        "Model %s rejected strict json_schema (%s); retrying in schema-free JSON mode.",
+                        target_model,
+                        message[:160],
+                    )
+                    response_format = {"type": "json_object"}
+                    schema_downgraded = True
+                    continue
+
+                if attempt < attempts and _is_retryable(exc):
+                    backoff = 1.5 * attempt
+                    logger.warning(
+                        "Groq call failed (attempt %d/%d): %s — retrying in %.1fs",
+                        attempt,
+                        attempts,
+                        message[:200],
+                        backoff,
+                    )
+                    time.sleep(backoff)
+                    continue
+
+                break
+
+    raise LLMError(f"Groq request to {requested_model} failed: {last_error}") from last_error
 
 
 def complete_json(

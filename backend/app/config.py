@@ -40,11 +40,8 @@ class Settings(BaseSettings):
     # that supports strict `json_schema` structured output, which is what lets
     # the generation pipeline skip defensive JSON parsing entirely.
     GROQ_MODEL: str = "openai/gpt-oss-120b"
-
-    # Verification and PYQ metadata extraction run once per question/paper and
-    # are simple classification tasks, so they use the smaller, cheaper model.
     GROQ_VERIFY_MODEL: str = "openai/gpt-oss-20b"
-
+    
     GROQ_TIMEOUT_SECONDS: float = 120.0
     GROQ_MAX_RETRIES: int = 2
 

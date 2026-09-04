@@ -198,7 +198,7 @@ def assert_upload_allowed(file_name: str, size_bytes: int) -> None:
     Extension and size are enforced here. Virus scanning needs an external
     scanner and is deliberately not faked — see docs/OPERATIONS.md.
     """
-    from app.utils.file_parser import SUPPORTED_EXTENSIONS, file_extension
+    from app.utils.file_parser import is_supported, file_extension
 
     settings = get_settings()
 
@@ -212,12 +212,11 @@ def assert_upload_allowed(file_name: str, size_bytes: int) -> None:
             f"{settings.MAX_UPLOAD_MB} MB.",
         )
 
-    extension = file_extension(file_name)
-    if extension not in SUPPORTED_EXTENSIONS:
+    if not is_supported(file_name):
+        extension = file_extension(file_name)
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            f"'.{extension or 'unknown'}' files cannot be indexed. "
-            f"Supported formats: {', '.join(SUPPORTED_EXTENSIONS)}.",
+            f"'.{extension or 'unknown'}' executable files cannot be uploaded.",
         )
 
 

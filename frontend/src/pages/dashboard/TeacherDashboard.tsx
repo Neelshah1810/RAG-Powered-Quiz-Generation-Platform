@@ -42,27 +42,36 @@ export default function TeacherDashboard() {
       </div>
 
       <div className="grid-3" style={{ marginBottom: 24 }}>
-        {/* Quick Start: Paper Style */}
+        {/* Quick Start: Manual Paper Style Entry */}
         <div
           className="card"
           style={{
-            padding: 24, cursor: 'pointer',
+            padding: 24,
             background: 'linear-gradient(135deg, #AB47BC, #7B1FA2)',
             color: 'white',
           }}
-          onClick={() => navigate('/paper-style')}
         >
           <Sparkles size={32} style={{ marginBottom: 12, opacity: 0.9 }} />
-          <h3 style={{ color: 'white', fontSize: 18, marginBottom: 8 }}>Start Paper Style</h3>
-          <p style={{ opacity: 0.85, fontSize: 13, marginBottom: 16 }}>
-            Generate exam-ready question drafts grounded in your course material
+          <h3 style={{ color: 'white', fontSize: 18, marginBottom: 4 }}>Manual Paper Style</h3>
+          <p style={{ opacity: 0.9, fontSize: 13, marginBottom: 14 }}>
+            Configure paper blueprints & enter exam papers manually for Internal (30 marks) and External (70 marks)
           </p>
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            fontSize: 13, fontWeight: 500, opacity: 0.9,
-          }}>
-            Generate now <ChevronRight size={16} />
-          </span>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-sm"
+              style={{ background: 'white', color: '#7B1FA2', fontWeight: 600, border: 'none' }}
+              onClick={() => navigate('/paper-style?preset=internal')}
+            >
+              Internal (30 Marks)
+            </button>
+            <button
+              className="btn btn-sm"
+              style={{ background: 'rgba(255,255,255,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.4)' }}
+              onClick={() => navigate('/paper-style?preset=external')}
+            >
+              External (70 Marks)
+            </button>
+          </div>
         </div>
 
         <div className="card" style={{ padding: 24 }}>

@@ -1,17 +1,29 @@
 // ============================================================
 // Academix AI — Course Page
 // Google Classroom parity: Stream / Classwork / People tabs
+// Multi-file Drag & Drop Uploads + Course-wide Material Re-indexing
 // ============================================================
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/lib/api'
 import type { Course, StreamItem, Material, Assignment, Enrollment } from '@/lib/types'
-import { ArrowLeft, Upload, Plus, FileText, ClipboardList, Clock, Download, RefreshCw } from 'lucide-react'
+import {
+  ArrowLeft, Upload, Plus, FileText, ClipboardList, Clock, Download, RefreshCw, X, CheckCircle2, AlertCircle
+} from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
 
 type Tab = 'stream' | 'classwork' | 'people'
+
+interface BatchFileItem {
+  file: File
+  title: string
+  sourceType: string
+  examType: string
+  year: string
+  status: 'idle' | 'uploading' | 'done' | 'error'
+}
 
 function statusBadgeClass(status?: string) {
   if (status === 'indexed') return 'badge-green'
@@ -44,6 +56,7 @@ export default function CoursePage() {
   const [people, setPeople] = useState<Enrollment[]>([])
   const [loading, setLoading] = useState(true)
   const [reindexingIds, setReindexingIds] = useState<Record<string, boolean>>({})
+  const [reindexingAll, setReindexingAll] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const [showUpload, setShowUpload] = useState(false)
@@ -55,11 +68,12 @@ export default function CoursePage() {
   const [assignInstructions, setAssignInstructions] = useState('')
   const [assignDue, setAssignDue] = useState('')
   const [assignPoints, setAssignPoints] = useState(100)
-  const [uploadFile, setUploadFile] = useState<File | null>(null)
-  const [uploadTitle, setUploadTitle] = useState('')
-  const [uploadSourceType, setUploadSourceType] = useState('notes')
-  const [uploadExamType, setUploadExamType] = useState('internal')
-  const [uploadYear, setUploadYear] = useState(String(new Date().getFullYear()))
+
+  // Drag and drop / Batch Upload states
+  const [selectedFiles, setSelectedFiles] = useState<BatchFileItem[]>([])
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [batchUploading, setBatchUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const refreshMaterials = useCallback(async () => {
     if (!courseId) return [] as Material[]
@@ -91,10 +105,9 @@ export default function CoursePage() {
     load()
   }, [courseId])
 
-  // Poll while any material is pending/processing (or local reindex in flight)
   const needsPoll = materials.some(m =>
     m.ingestion_status === 'pending' || m.ingestion_status === 'processing'
-  ) || Object.keys(reindexingIds).length > 0
+  ) || Object.keys(reindexingIds).length > 0 || reindexingAll
 
   useEffect(() => {
     if (!needsPoll || !courseId) {
@@ -115,11 +128,12 @@ export default function CoursePage() {
         )
         if (!stillBusy) {
           setReindexingIds({})
+          setReindexingAll(false)
           const failed = list.filter(m => m.ingestion_status === 'failed')
           if (failed.length) {
             toast.error(`${failed.length} material(s) failed to index`)
           } else {
-            toast.success('Material indexing complete')
+            toast.success('All materials indexed cleanly! ✅')
           }
         }
       } catch { /* keep polling */ }
@@ -132,6 +146,92 @@ export default function CoursePage() {
       }
     }
   }, [needsPoll, courseId, refreshMaterials])
+
+  const handleFilesAdded = (files: FileList | File[]) => {
+    const arr = Array.from(files)
+    if (arr.length === 0) return
+    const newItems: BatchFileItem[] = arr.map(f => ({
+      file: f,
+      title: f.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
+      sourceType: 'notes',
+      examType: 'internal',
+      year: String(new Date().getFullYear()),
+      status: 'idle',
+    }))
+    setSelectedFiles(prev => [...prev, ...newItems])
+  }
+
+  const removeFileFromQueue = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const updateQueueItem = (index: number, field: keyof BatchFileItem, value: any) => {
+    setSelectedFiles(prev =>
+      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+    )
+  }
+
+  const uploadBatchMaterials = async () => {
+    if (selectedFiles.length === 0) return
+    setBatchUploading(true)
+    let successCount = 0
+
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const item = selectedFiles[i]
+      if (item.status === 'done') continue
+
+      setSelectedFiles(prev =>
+        prev.map((f, idx) => (idx === i ? { ...f, status: 'uploading' } : f))
+      )
+
+      const form = new FormData()
+      form.append('file', item.file)
+      form.append('title', item.title || item.file.name)
+      form.append('source_type', item.sourceType)
+      if (item.sourceType === 'pyq') {
+        form.append('exam_type', item.examType)
+        if (item.year) form.append('year', item.year)
+      }
+
+      try {
+        await api.post(`/classroom/${courseId}/materials`, form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        setSelectedFiles(prev =>
+          prev.map((f, idx) => (idx === i ? { ...f, status: 'done' } : f))
+        )
+        successCount++
+      } catch (err: any) {
+        setSelectedFiles(prev =>
+          prev.map((f, idx) => (idx === i ? { ...f, status: 'error' } : f))
+        )
+        toast.error(`Failed to upload ${item.file.name}: ${err.response?.data?.detail || 'Error'}`)
+      }
+    }
+
+    setBatchUploading(false)
+    if (successCount > 0) {
+      toast.success(`Successfully uploaded ${successCount} file(s) for RAG indexing`)
+      await refreshMaterials()
+      setShowUpload(false)
+      setSelectedFiles([])
+    }
+  }
+
+  const reindexAllMaterials = async () => {
+    if (!courseId) return
+    setReindexingAll(true)
+    setMaterials(prev => prev.map(m => ({ ...m, ingestion_status: 'processing' })))
+    try {
+      await api.post(`/rag/courses/${courseId}/reindex-all`)
+      toast.success('Started full re-indexing of all course materials!')
+      await refreshMaterials()
+    } catch (err: any) {
+      setReindexingAll(false)
+      toast.error(err.response?.data?.detail || 'Re-indexing failed')
+      await refreshMaterials()
+    }
+  }
 
   const postAnnouncement = async () => {
     if (!announceText.trim()) return
@@ -163,33 +263,6 @@ export default function CoursePage() {
       const a = await api.get(`/classroom/${courseId}/assignments`)
       setAssignments(a.data || [])
     } catch { toast.error('Failed to create') }
-  }
-
-  const uploadMaterial = async () => {
-    if (!uploadFile || !uploadTitle.trim()) return
-    if (uploadSourceType === 'pyq' && !uploadExamType) {
-      toast.error('Select exam type for PYQ papers')
-      return
-    }
-    const form = new FormData()
-    form.append('file', uploadFile)
-    form.append('title', uploadTitle)
-    form.append('source_type', uploadSourceType)
-    if (uploadSourceType === 'pyq') {
-      form.append('exam_type', uploadExamType)
-      if (uploadYear) form.append('year', uploadYear)
-    }
-    try {
-      await api.post(`/classroom/${courseId}/materials`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      })
-      toast.success('Uploaded — indexing for RAG started')
-      setShowUpload(false)
-      setUploadFile(null); setUploadTitle(''); setUploadSourceType('notes')
-      await refreshMaterials()
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Upload failed')
-    }
   }
 
   const downloadMaterial = async (materialId: string, e: React.MouseEvent) => {
@@ -235,13 +308,14 @@ export default function CoursePage() {
 
   const isTeacher = user?.role === 'teacher' || user?.role === 'admin'
   const indexingCount = materials.filter(m =>
-    m.ingestion_status === 'pending' || m.ingestion_status === 'processing' || reindexingIds[m.id]
+    m.ingestion_status === 'pending' || m.ingestion_status === 'processing' || reindexingIds[m.id] || reindexingAll
   ).length
 
   if (loading) return <div className="skeleton" style={{ height: 400, borderRadius: 12 }} />
 
   return (
     <div>
+      {/* Banner */}
       <div style={{
         background: course?.banner_color || '#4285F4',
         borderRadius: 12,
@@ -293,10 +367,12 @@ export default function CoursePage() {
 
           {stream.map(item => (
             <div key={item.id} className="stream-item" style={{ marginBottom: 12 }}>
-              <div className="avatar">{item.author_name?.charAt(0) || '?'}</div>
+              <div className="avatar">
+                {item.author_name ? item.author_name.trim().charAt(0).toUpperCase() : (user?.full_name ? user.full_name.trim().charAt(0).toUpperCase() : 'U')}
+              </div>
               <div style={{ flex: 1 }}>
                 <div className="flex-between">
-                  <span className="font-medium">{item.author_name}</span>
+                  <span className="font-medium">{item.author_name || user?.full_name || 'User'}</span>
                   <span className="text-muted text-small">
                     {item.created_at ? format(new Date(item.created_at), 'MMM d, h:mm a') : ''}
                   </span>
@@ -329,15 +405,24 @@ export default function CoursePage() {
       )}
 
       {tab === 'classwork' && (
-        <div style={{ maxWidth: 720, margin: '0 auto' }}>
+        <div style={{ maxWidth: 780, margin: '0 auto' }}>
           {isTeacher && (
             <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
               <button className="btn btn-primary" onClick={() => setShowAssignment(true)}>
                 <Plus size={16} /> Assignment
               </button>
               <button className="btn btn-secondary" onClick={() => setShowUpload(true)}>
-                <Upload size={16} /> Upload Material
+                <Upload size={16} /> Upload Material (Multi / Drag & Drop)
               </button>
+              <button
+                className="btn btn-secondary"
+                onClick={reindexAllMaterials}
+                disabled={reindexingAll || materials.length === 0}
+                title="Re-index all course materials for RAG vector search"
+              >
+                <RefreshCw size={16} className={reindexingAll ? 'spin' : ''} /> Re-index All Course Material
+              </button>
+
               {indexingCount > 0 && (
                 <span className="badge badge-yellow" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <RefreshCw size={12} className="spin" />
@@ -368,7 +453,7 @@ export default function CoursePage() {
             </div>
           ))}
 
-          <h3 style={{ margin: '24px 0 12px' }}>Materials</h3>
+          <h3 style={{ margin: '24px 0 12px' }}>Course Material & RAG Corpus</h3>
           {materials.length === 0 && (
             <p className="text-muted" style={{ marginBottom: 16 }}>No materials uploaded yet</p>
           )}
@@ -376,6 +461,7 @@ export default function CoursePage() {
             const busy = Boolean(reindexingIds[m.id])
               || m.ingestion_status === 'pending'
               || m.ingestion_status === 'processing'
+              || reindexingAll
             return (
               <div key={m.id} className="card" style={{ padding: 16, marginBottom: 8 }}>
                 <div className="flex-between" style={{ gap: 12 }}>
@@ -407,7 +493,7 @@ export default function CoursePage() {
                         className="btn btn-ghost btn-icon"
                         onClick={(e) => reindexMaterial(m, e)}
                         disabled={busy}
-                        title="Re-index for RAG"
+                        title="Re-index file for RAG"
                       >
                         <RefreshCw size={18} className={busy ? 'spin' : undefined} />
                       </button>
@@ -431,7 +517,9 @@ export default function CoursePage() {
               display: 'flex', alignItems: 'center', gap: 12,
               padding: '10px 0', borderBottom: '1px solid var(--color-border)',
             }}>
-              <div className="avatar">{p.user_name?.charAt(0) || '?'}</div>
+              <div className="avatar">
+                {p.user_name ? p.user_name.trim().charAt(0).toUpperCase() : (p.user_email ? p.user_email.trim().charAt(0).toUpperCase() : 'T')}
+              </div>
               <div>
                 <div className="font-medium">{p.user_name}</div>
                 <div className="text-muted text-small">{p.user_email}</div>
@@ -444,7 +532,9 @@ export default function CoursePage() {
               display: 'flex', alignItems: 'center', gap: 12,
               padding: '10px 0', borderBottom: '1px solid var(--color-border)',
             }}>
-              <div className="avatar" style={{ width: 32, height: 32, fontSize: 12 }}>{p.user_name?.charAt(0) || '?'}</div>
+              <div className="avatar" style={{ width: 32, height: 32, fontSize: 12 }}>
+                {p.user_name ? p.user_name.trim().charAt(0).toUpperCase() : (p.user_email ? p.user_email.trim().charAt(0).toUpperCase() : 'S')}
+              </div>
               <div>
                 <div className="font-medium">{p.user_name}</div>
                 <div className="text-muted text-small">{p.user_email}</div>
@@ -454,56 +544,155 @@ export default function CoursePage() {
         </div>
       )}
 
+      {/* Multi-File Upload & Drag-and-Drop Modal */}
       {showUpload && (
         <div className="modal-overlay" onClick={() => setShowUpload(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+          <div
+            className="modal"
+            style={{ maxWidth: 700, width: '90%' }}
+            onClick={e => e.stopPropagation()}
+          >
             <div className="modal-header">
-              <h3>Upload Material</h3>
-              <button className="btn btn-ghost btn-icon" onClick={() => setShowUpload(false)}>✕</button>
+              <h3>Upload Course Materials (Multi-File / Drag & Drop)</h3>
+              <button className="btn btn-ghost btn-icon" onClick={() => setShowUpload(false)}>
+                <X size={18} />
+              </button>
             </div>
+
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div className="input-group">
-                <label className="input-label">Title</label>
-                <input className="input" value={uploadTitle} onChange={e => setUploadTitle(e.target.value)}
-                  placeholder="e.g. Chapter 3 Notes" />
+              {/* Drag and Drop Zone */}
+              <div
+                style={{
+                  border: `2px dashed ${isDragOver ? '#4285F4' : 'var(--color-border)'}`,
+                  borderRadius: 12,
+                  padding: '30px 20px',
+                  textAlign: 'center',
+                  background: isDragOver ? '#E8F0FE' : 'var(--color-surface-2)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                onDragOver={e => {
+                  e.preventDefault()
+                  setIsDragOver(true)
+                }}
+                onDragLeave={() => setIsDragOver(false)}
+                onDrop={e => {
+                  e.preventDefault()
+                  setIsDragOver(false)
+                  if (e.dataTransfer.files) {
+                    handleFilesAdded(e.dataTransfer.files)
+                  }
+                }}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload size={36} color="#4285F4" style={{ marginBottom: 8 }} />
+                <p className="font-medium">Drag & Drop multiple files here, or click to browse</p>
+                <p className="text-muted text-small" style={{ marginTop: 4 }}>
+                  Supports any document, text file, code file, PDF, DOCX, PPTX, CSV, JSON, LOG, etc.
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    if (e.target.files) handleFilesAdded(e.target.files)
+                  }}
+                />
               </div>
-              <div className="input-group">
-                <label className="input-label">Type</label>
-                <select className="input" value={uploadSourceType} onChange={e => setUploadSourceType(e.target.value)}>
-                  <option value="notes">Lecture Notes</option>
-                  <option value="textbook">Textbook</option>
-                  <option value="pyq">Previous Year Question Paper</option>
-                </select>
-              </div>
-              {uploadSourceType === 'pyq' && (
-                <div className="grid-2" style={{ gap: 12 }}>
-                  <div className="input-group">
-                    <label className="input-label">Exam type</label>
-                    <select className="input" value={uploadExamType} onChange={e => setUploadExamType(e.target.value)}>
-                      <option value="internal">Internal</option>
-                      <option value="external">External</option>
-                    </select>
-                  </div>
-                  <div className="input-group">
-                    <label className="input-label">Year</label>
-                    <input className="input" type="number" value={uploadYear}
-                      onChange={e => setUploadYear(e.target.value)} min={1990} max={2100} />
+
+              {/* Queue List */}
+              {selectedFiles.length > 0 && (
+                <div>
+                  <h4 style={{ marginBottom: 10 }}>Selected Files ({selectedFiles.length})</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 260, overflowY: 'auto' }}>
+                    {selectedFiles.map((item, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          padding: 12,
+                          borderRadius: 8,
+                          border: '1px solid var(--color-border)',
+                          background: 'var(--color-surface)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 8,
+                        }}
+                      >
+                        <div className="flex-between">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                            <FileText size={18} color="#4285F4" />
+                            <span className="font-medium text-small text-ellipsis" title={item.file.name}>
+                              {item.file.name} ({(item.file.size / 1024).toFixed(1)} KB)
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {item.status === 'done' && <CheckCircle2 size={16} color="#0F9D58" />}
+                            {item.status === 'uploading' && <RefreshCw size={16} className="spin" color="#4285F4" />}
+                            {item.status === 'error' && <AlertCircle size={16} color="#DB4437" />}
+                            <button
+                              className="btn btn-ghost btn-icon text-small"
+                              onClick={() => removeFileFromQueue(idx)}
+                              disabled={batchUploading}
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid-3" style={{ gap: 8 }}>
+                          <input
+                            className="input"
+                            style={{ fontSize: 12, padding: '4px 8px' }}
+                            placeholder="Title"
+                            value={item.title}
+                            onChange={e => updateQueueItem(idx, 'title', e.target.value)}
+                          />
+
+                          <select
+                            className="input"
+                            style={{ fontSize: 12, padding: '4px 8px' }}
+                            value={item.sourceType}
+                            onChange={e => updateQueueItem(idx, 'sourceType', e.target.value)}
+                          >
+                            <option value="notes">Notes</option>
+                            <option value="textbook">Textbook</option>
+                            <option value="pyq">PYQ</option>
+                          </select>
+
+                          {item.sourceType === 'pyq' ? (
+                            <select
+                              className="input"
+                              style={{ fontSize: 12, padding: '4px 8px' }}
+                              value={item.examType}
+                              onChange={e => updateQueueItem(idx, 'examType', e.target.value)}
+                            >
+                              <option value="internal">Internal</option>
+                              <option value="external">External</option>
+                            </select>
+                          ) : (
+                            <div className="text-muted text-small" style={{ display: 'flex', alignItems: 'center' }}>
+                              Auto RAG Index
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
-              <div className="input-group">
-                <label className="input-label">File (PDF, DOCX, PPTX, TXT)</label>
-                <input type="file" className="input" onChange={e => setUploadFile(e.target.files?.[0] || null)}
-                  accept=".pdf,.docx,.pptx,.txt" />
-              </div>
-              <p className="text-muted text-small">
-                Uploaded materials are automatically indexed for AI quiz generation. Status appears next to each file.
-              </p>
             </div>
+
             <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={() => setShowUpload(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={uploadMaterial} disabled={!uploadFile || !uploadTitle}>
-                Upload
+              <button className="btn btn-ghost" onClick={() => setShowUpload(false)} disabled={batchUploading}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={uploadBatchMaterials}
+                disabled={selectedFiles.length === 0 || batchUploading}
+              >
+                {batchUploading ? 'Uploading & Indexing...' : `Upload & Index ${selectedFiles.length} File(s)`}
               </button>
             </div>
           </div>

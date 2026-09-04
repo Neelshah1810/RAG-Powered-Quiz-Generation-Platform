@@ -66,7 +66,7 @@ export default function TopBar() {
           onClick={() => setShowMenu(!showMenu)}
           style={{ cursor: 'pointer', border: 'none', fontSize: 14, width: 36, height: 36 }}
         >
-          {user?.full_name?.charAt(0) || '?'}
+          {user?.full_name ? user.full_name.trim().charAt(0).toUpperCase() : (user?.email ? user.email.trim().charAt(0).toUpperCase() : 'U')}
         </button>
 
         {showMenu && (

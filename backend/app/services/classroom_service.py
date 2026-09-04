@@ -733,24 +733,57 @@ async def get_course_stream(course_id: str, limit: int = 50) -> list[dict]:
         .execute()
     ).data or []
 
+    user_ids = set()
+    for row in announcements:
+        if row.get("posted_by"):
+            user_ids.add(row["posted_by"])
+    for row in materials:
+        if row.get("uploaded_by"):
+            user_ids.add(row["uploaded_by"])
+    for row in assignments:
+        if row.get("created_by"):
+            user_ids.add(row["created_by"])
+
+    user_map = {}
+    if user_ids:
+        profiles_data = (
+            supabase.table("profiles")
+            .select("id, full_name, avatar_url")
+            .in_("id", list(user_ids))
+            .execute()
+            .data
+            or []
+        )
+        user_map = {p["id"]: p for p in profiles_data}
+
     stream: list[dict] = []
 
     for row in announcements:
         author = row.get(_ANNOUNCEMENT_AUTHOR) or {}
+        uid = row.get("posted_by")
+        profile = user_map.get(uid, {})
+        author_name = author.get("full_name") or profile.get("full_name") or "Teacher"
+        author_avatar = author.get("avatar_url") or profile.get("avatar_url")
+
         stream.append(
             {
                 "id": row["id"],
                 "type": "announcement",
                 "text": row["text"],
                 "attachment_urls": row.get("attachment_urls") or [],
-                "author_name": author.get("full_name"),
-                "author_avatar": author.get("avatar_url"),
+                "author_name": author_name,
+                "author_avatar": author_avatar,
                 "created_at": row["posted_at"],
             }
         )
 
     for row in materials:
         author = row.get(_MATERIAL_UPLOADER) or {}
+        uid = row.get("uploaded_by")
+        profile = user_map.get(uid, {})
+        author_name = author.get("full_name") or profile.get("full_name") or "Teacher"
+        author_avatar = author.get("avatar_url") or profile.get("avatar_url")
+
         stream.append(
             {
                 "id": row["id"],
@@ -760,14 +793,19 @@ async def get_course_stream(course_id: str, limit: int = 50) -> list[dict]:
                 "file_url": row.get("file_url"),
                 "file_name": row.get("file_name"),
                 "topic_tag": row.get("topic_tag"),
-                "author_name": author.get("full_name"),
-                "author_avatar": author.get("avatar_url"),
+                "author_name": author_name,
+                "author_avatar": author_avatar,
                 "created_at": row["created_at"],
             }
         )
 
     for row in assignments:
         author = row.get(_ASSIGNMENT_AUTHOR) or {}
+        uid = row.get("created_by")
+        profile = user_map.get(uid, {})
+        author_name = author.get("full_name") or profile.get("full_name") or "Teacher"
+        author_avatar = author.get("avatar_url") or profile.get("avatar_url")
+
         stream.append(
             {
                 "id": row["id"],
@@ -776,8 +814,8 @@ async def get_course_stream(course_id: str, limit: int = 50) -> list[dict]:
                 "text": row.get("instructions"),
                 "due_at": row.get("due_at"),
                 "max_points": row.get("max_points"),
-                "author_name": author.get("full_name"),
-                "author_avatar": author.get("avatar_url"),
+                "author_name": author_name,
+                "author_avatar": author_avatar,
                 "created_at": row["created_at"],
             }
         )

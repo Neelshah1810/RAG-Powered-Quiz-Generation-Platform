@@ -254,6 +254,40 @@ class QuizAttemptResponse(BaseModel):
     results: list[QuestionResult] = Field(default_factory=list)
 
 
+class ManualStyleProfileRequest(BaseModel):
+    course_id: str
+    exam_type: ExamType
+    total_marks: int = Field(default=30, ge=1)
+    duration_minutes: int = Field(default=60, ge=1)
+    passing_marks: Optional[int] = None
+    instructions: Optional[str] = None
+    section_structure: list[dict[str, Any]] = Field(default_factory=list)
+    bloom_distribution: dict[str, float] = Field(default_factory=dict)
+
+
+class ManualQuestionInput(BaseModel):
+    question_text: str
+    question_type: QuestionType = "short_answer"
+    marks: int = Field(default=2, ge=1)
+    section: Optional[str] = None
+    options: Optional[list[str]] = None
+    correct_answer: Optional[str] = None
+    bloom_level: Optional[str] = "understand"
+    topic_tag: Optional[str] = None
+
+
+class ManualPaperSetRequest(BaseModel):
+    course_id: str
+    exam_type: ExamType = "internal"
+    title: Optional[str] = "Manual Question Paper"
+    total_marks: int = Field(default=30, ge=1)
+    duration_minutes: int = Field(default=60, ge=1)
+    status: Literal["draft", "approved"] = "draft"
+    instructions: Optional[str] = None
+    section_structure: list[dict[str, Any]] = Field(default_factory=list)
+    questions: list[ManualQuestionInput] = Field(default_factory=list)
+
+
 # ── Style profile ────────────────────────────────────────────────────────────
 
 class StyleProfileResponse(BaseModel):

@@ -41,6 +41,9 @@ from app.models.rag import (
     RegenerateQuestionRequest,
     SetApprovalRequest,
     StyleProfileResponse,
+    ManualStyleProfileRequest,
+    ManualPaperSetRequest,
+    ManualQuestionInput,
 )
 from app.services import authz, notice_service
 from app.services.rag import export, generation, retrieval, style_profile, verification
@@ -343,6 +346,53 @@ async def reindex_document(
         "status": "processing",
         "document_id": document_id,
         "message": "Re-indexing started. Poll materials until status is indexed or failed.",
+    }
+
+
+@router.post("/courses/{course_id}/reindex-all", status_code=status.HTTP_202_ACCEPTED)
+async def reindex_all_course_documents(
+    course_id: str,
+    current_user: CurrentUser = Depends(require_role("admin", "teacher")),
+):
+    """Trigger background re-indexing for all materials/documents belonging to a course."""
+    authz.assert_course_staff(course_id, current_user)
+    supabase = get_supabase_admin()
+
+    docs = (
+        supabase.table("content_documents")
+        .select("id, file_url, file_name, source_type, exam_type, year")
+        .eq("course_id", course_id)
+        .execute()
+        .data or []
+    )
+
+    if not docs:
+        return {"status": "success", "message": "No documents to re-index", "count": 0}
+
+    import asyncio
+    from app.services.rag.ingestion import ingest_document
+
+    supabase.table("content_documents").update(
+        {"status": "processing", "error_message": None}
+    ).eq("course_id", course_id).execute()
+
+    for doc in docs:
+        asyncio.create_task(
+            ingest_document(
+                document_id=doc["id"],
+                course_id=course_id,
+                file_url=doc["file_url"],
+                file_name=doc["file_name"],
+                source_type=doc["source_type"],
+                exam_type=doc.get("exam_type"),
+                year=doc.get("year"),
+            )
+        )
+
+    return {
+        "status": "processing",
+        "count": len(docs),
+        "message": f"Re-indexing started for {len(docs)} documents.",
     }
 
 
@@ -1191,12 +1241,156 @@ async def recompute_style_profile(
     profile = await style_profile.compute_style_profile(course_id, exam_type)
     if not profile:
         raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"Not enough {exam_type} question data to build a profile "
-            f"(at least {style_profile.MIN_QUESTIONS} extracted questions are "
-            f"needed). Upload more previous-year papers.",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Not enough PYQ data to compute a {exam_type} style profile for "
+            f"this course.",
         )
     return profile
+
+
+@router.post("/style-profile/manual", response_model=StyleProfileResponse)
+async def save_manual_style_profile(
+    data: ManualStyleProfileRequest,
+    current_user: CurrentUser = Depends(require_role("admin", "teacher")),
+):
+    """Save or update manual paper style structure (e.g. Internal 30 marks or External 70 marks)."""
+    authz.assert_course_staff(data.course_id, current_user)
+    supabase = get_supabase_admin()
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    profile_data = {
+        "course_id": data.course_id,
+        "exam_type": data.exam_type,
+        "total_marks": data.total_marks,
+        "duration_minutes": data.duration_minutes,
+        "section_structure": data.section_structure,
+        "bloom_distribution": data.bloom_distribution or {},
+        "common_patterns": {
+            "instructions": data.instructions,
+            "passing_marks": data.passing_marks,
+            "is_manual": True,
+        },
+        "confidence_score": 1.0,
+        "last_computed_at": now_iso,
+    }
+
+    res = (
+        supabase.table("style_profiles")
+        .upsert(profile_data, on_conflict="course_id,exam_type")
+        .execute()
+    )
+    if res.data and len(res.data) > 0:
+        return res.data[0]
+    profile_data["id"] = f"{data.course_id}-{data.exam_type}"
+    return profile_data
+
+
+@router.post("/sets/manual", response_model=GeneratedSetResponse)
+async def create_manual_paper_set(
+    data: ManualPaperSetRequest,
+    current_user: CurrentUser = Depends(require_role("admin", "teacher")),
+):
+    """
+    Manually create and persist a Paper Style question set (Internal 30 / External 70 marks).
+    """
+    authz.assert_course_staff(data.course_id, current_user)
+    supabase = get_supabase_admin()
+
+    total_q = len(data.questions)
+    calc_total_marks = sum(q.marks for q in data.questions) if data.questions else data.total_marks
+
+    # Insert generated set
+    set_row = (
+        supabase.table("generated_sets")
+        .insert({
+            "requested_by": current_user.id,
+            "course_id": data.course_id,
+            "mode": "paper_style",
+            "exam_type": data.exam_type,
+            "topic_tags": [],
+            "difficulty": "medium",
+            "status": data.status,
+            "total_questions": total_q,
+            "total_marks": calc_total_marks,
+            "generation_config": {
+                "manual_entry": True,
+                "title": data.title,
+                "duration_minutes": data.duration_minutes,
+                "instructions": data.instructions,
+                "section_structure": data.section_structure,
+            },
+        })
+        .execute()
+    )
+    set_id = (set_row.data or [{}])[0].get("id")
+    if not set_id:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Could not create manual set")
+
+    # Insert questions
+    inserted_questions = []
+    for idx, q in enumerate(data.questions):
+        q_row = (
+            supabase.table("generated_questions")
+            .insert({
+                "set_id": set_id,
+                "question_text": q.question_text,
+                "question_type": q.question_type,
+                "marks": q.marks,
+                "section": q.section or "Section A",
+                "options": q.options,
+                "correct_answer": q.correct_answer or "",
+                "bloom_level": q.bloom_level or "understand",
+                "topic_tag": q.topic_tag,
+                "position": idx + 1,
+                "teacher_edited": True,
+            })
+            .execute()
+        )
+        if q_row.data:
+            inserted_questions.append(q_row.data[0])
+
+    # Also update style profile for the course
+    try:
+        supabase.table("style_profiles").upsert({
+            "course_id": data.course_id,
+            "exam_type": data.exam_type,
+            "total_marks": calc_total_marks,
+            "duration_minutes": data.duration_minutes,
+            "section_structure": data.section_structure,
+            "confidence_score": 1.0,
+            "question_count": total_q,
+            "pyq_count": 1,
+            "last_computed_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="course_id,exam_type").execute()
+    except Exception as exc:
+        logger.warning(f"Could not update style profile for manual set: {exc}")
+
+    full_set = (
+        supabase.table("generated_sets")
+        .select("*, courses(name, code), profiles!generated_sets_requested_by_fkey(full_name)")
+        .eq("id", set_id)
+        .single()
+        .execute()
+        .data
+    )
+    if full_set:
+        course_data = full_set.pop("courses", None) or {}
+        full_set["course_name"] = course_data.get("name")
+        full_set["course_code"] = course_data.get("code")
+        full_set["questions"] = inserted_questions
+        return full_set
+
+    return {
+        "id": set_id,
+        "requested_by": current_user.id,
+        "course_id": data.course_id,
+        "mode": "paper_style",
+        "exam_type": data.exam_type,
+        "status": data.status,
+        "total_questions": total_q,
+        "total_marks": calc_total_marks,
+        "questions": inserted_questions,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

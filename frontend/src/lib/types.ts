@@ -200,16 +200,17 @@ export interface GeneratedQuestion {
   set_id: string
   question_text: string
   question_type: QuestionType
+  section?: string
   options?: string[]
   correct_answer: string
   explanation?: string
   marks: number
   bloom_level?: BloomLevel
-  source_chunk_ids: string[]
-  source_texts: Array<string | SourceChunk>
+  source_chunk_ids?: string[]
+  source_texts?: Array<string | SourceChunk>
   faithfulness_score?: number
-  teacher_edited: boolean
-  question_order: number
+  teacher_edited?: boolean
+  question_order?: number
 }
 
 /** Format a source entry for display (handles string or structured chunk). */
@@ -234,6 +235,8 @@ export interface GeneratedSet {
   created_at: string
   approved_at?: string
   course_name?: string
+  course_code?: string
+  generation_config?: Record<string, any>
   questions: GeneratedQuestion[]
 }
 

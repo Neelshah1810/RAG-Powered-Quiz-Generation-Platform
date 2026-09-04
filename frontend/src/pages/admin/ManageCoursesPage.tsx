@@ -285,7 +285,7 @@ export default function ManageCoursesPage() {
                       padding: '10px 8px', borderBottom: '1px solid var(--color-border)',
                     }}>
                       <div className="avatar" style={{ width: 32, height: 32, fontSize: 12 }}>
-                        {e.user_name?.charAt(0) || '?'}
+                        {e.user_name ? e.user_name.trim().charAt(0).toUpperCase() : (e.user_email ? e.user_email.trim().charAt(0).toUpperCase() : 'T')}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div className="font-medium" style={{ fontSize: 14 }}>{e.user_name}</div>
@@ -324,7 +324,7 @@ export default function ManageCoursesPage() {
                       padding: '10px 8px', borderBottom: '1px solid var(--color-border)',
                     }}>
                       <div className="avatar" style={{ width: 32, height: 32, fontSize: 12 }}>
-                        {e.user_name?.charAt(0) || '?'}
+                        {e.user_name ? e.user_name.trim().charAt(0).toUpperCase() : (e.user_email ? e.user_email.trim().charAt(0).toUpperCase() : 'S')}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div className="font-medium" style={{ fontSize: 14 }}>{e.user_name}</div>

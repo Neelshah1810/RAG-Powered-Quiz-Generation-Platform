@@ -444,6 +444,8 @@ async def ingest_document(
 
         # 2. Extract text.
         text = extract_text(file_bytes, file_name)
+        if text:
+            text = text.replace("\x00", "").replace("\u0000", "")
         if not text or len(text.strip()) < 50:
             _fail(
                 document_id,
@@ -477,7 +479,7 @@ async def ingest_document(
             {
                 "document_id": document_id,
                 "course_id": course_id,
-                "text": chunk["text"],
+                "text": chunk["text"].replace("\x00", "").replace("\u0000", ""),
                 "source_type": source_type,
                 "exam_type": exam_type,
                 "chunk_index": chunk["chunk_index"],
