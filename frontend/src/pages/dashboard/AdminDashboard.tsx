@@ -32,8 +32,8 @@ export default function AdminDashboard() {
 
   const cards = [
     { label: 'Total Users', value: stats.total, icon: Users, color: '#4285F4', link: '/admin/users' },
-    { label: 'Teachers', value: stats.teachers, icon: Users, color: '#0F9D58', link: '/admin/users' },
-    { label: 'Students', value: stats.students, icon: Users, color: '#AB47BC', link: '/admin/users' },
+    { label: 'Teachers', value: stats.teachers, icon: Users, color: '#0F9D58', link: '/admin/users?tab=teacher' },
+    { label: 'Students', value: stats.students, icon: Users, color: '#AB47BC', link: '/admin/users?tab=student' },
     { label: 'Courses', value: courseCount, icon: GraduationCap, color: '#F4B400', link: '/admin/courses' },
   ]
 

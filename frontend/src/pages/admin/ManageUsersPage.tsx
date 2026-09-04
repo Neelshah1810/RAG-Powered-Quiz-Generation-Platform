@@ -3,6 +3,7 @@
 // User list with search and 3 role tabs (Admin, Teachers, Students)
 // ============================================================
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import api from '@/lib/api'
 import type { User } from '@/lib/types'
 import { Users, Plus, Search, Trash2 } from 'lucide-react'
@@ -10,11 +11,22 @@ import toast from 'react-hot-toast'
 
 type RoleTab = 'admin' | 'teacher' | 'student'
 
+function isValidTab(value: string | null): value is RoleTab {
+  return value === 'admin' || value === 'teacher' || value === 'student'
+}
+
 export default function ManageUsersPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<RoleTab>('admin')
+
+  // Initialise tab from the URL query parameter, default to 'admin'
+  const tabFromUrl = searchParams.get('tab')
+  const [activeTab, setActiveTab] = useState<RoleTab>(
+    isValidTab(tabFromUrl) ? tabFromUrl : 'admin'
+  )
+
   const [showCreate, setShowCreate] = useState(false)
 
   const [formEmail, setFormEmail] = useState('')
@@ -22,6 +34,21 @@ export default function ManageUsersPage() {
   const [formPassword, setFormPassword] = useState('')
   const [formRole, setFormRole] = useState('student')
   const [formDept, setFormDept] = useState('')
+
+  // Sync the URL when the tab changes, so browser back/forward works
+  const changeTab = (tab: RoleTab) => {
+    setActiveTab(tab)
+    setSearchParams(tab === 'admin' ? {} : { tab }, { replace: true })
+  }
+
+  // Also react if someone navigates here with a different ?tab while already mounted
+  useEffect(() => {
+    const newTab = searchParams.get('tab')
+    if (isValidTab(newTab) && newTab !== activeTab) {
+      setActiveTab(newTab)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   useEffect(() => { loadUsers() }, [activeTab, search])
 
@@ -93,7 +120,7 @@ export default function ManageUsersPage() {
         {(['admin', 'teacher', 'student'] as RoleTab[]).map(role => (
           <div key={role}
             className={`tab ${activeTab === role ? 'active' : ''}`}
-            onClick={() => setActiveTab(role)}>
+            onClick={() => changeTab(role)}>
             {tabCounts[role]}
           </div>
         ))}
