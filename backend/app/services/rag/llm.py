@@ -17,9 +17,9 @@ tasks that do not need the guarantee.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import time
 from typing import Any
 
 from app.config import get_settings
@@ -60,12 +60,12 @@ def get_client():
     """The shared Groq client (constructed once)."""
     global _client
     if _client is None:
-        from groq import Groq
+        from groq import AsyncGroq
 
         settings = get_settings()
         if not settings.GROQ_API_KEY:
             raise LLMError("GROQ_API_KEY is not set — the RAG engine cannot generate.")
-        _client = Groq(
+        _client = AsyncGroq(
             api_key=settings.GROQ_API_KEY,
             timeout=settings.GROQ_TIMEOUT_SECONDS,
             max_retries=0,  # retries are handled below so we can log them
@@ -91,7 +91,7 @@ def _is_model_not_found_error(exc: Exception) -> bool:
     return any(marker in msg for marker in ("model_not_found", "does not exist", "not have access to it", "invalid_request_error", "404"))
 
 
-def complete_text(
+async def complete_text(
     *,
     system: str,
     user: str,
@@ -118,7 +118,7 @@ def complete_text(
         attempts = max(1, settings.GROQ_MAX_RETRIES + 1)
         for attempt in range(1, attempts + 1):
             try:
-                response = client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model=target_model,
                     messages=messages,
                     temperature=temperature,
@@ -142,14 +142,14 @@ def complete_text(
                         str(exc)[:200],
                         backoff,
                     )
-                    time.sleep(backoff)
+                    await asyncio.sleep(backoff)
                     continue
                 break
 
     raise LLMError(f"Groq text request to {requested_model} failed: {last_error}") from last_error
 
 
-def complete(
+async def complete(
     *,
     system: str,
     user: str,
@@ -196,7 +196,7 @@ def complete(
 
         for attempt in range(1, attempts + 1):
             try:
-                response = client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model=target_model,
                     messages=messages,
                     temperature=temperature,
@@ -239,7 +239,7 @@ def complete(
                         message[:200],
                         backoff,
                     )
-                    time.sleep(backoff)
+                    await asyncio.sleep(backoff)
                     continue
 
                 break
@@ -247,7 +247,7 @@ def complete(
     raise LLMError(f"Groq request to {requested_model} failed: {last_error}") from last_error
 
 
-def complete_json(
+async def complete_json(
     *,
     system: str,
     user: str,
@@ -264,7 +264,10 @@ def complete_json(
     below only matters on the schema-free fallback path, where a model may wrap
     its JSON in prose or a ``` fence.
     """
-    raw = complete(
+    if json_schema is None:
+        logger.warning("complete_json called without a schema. The model's reply may be arbitrary.")
+
+    raw = await complete(
         system=system,
         user=user,
         model=model,

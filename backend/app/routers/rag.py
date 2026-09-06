@@ -293,6 +293,7 @@ async def list_content_documents(
 @router.post("/documents/{document_id}/reindex", status_code=status.HTTP_202_ACCEPTED)
 async def reindex_document(
     document_id: str,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_role("admin", "teacher")),
 ):
     """
@@ -325,22 +326,17 @@ async def reindex_document(
         {"status": "processing", "error_message": None}
     ).eq("id", document_id).execute()
 
-    import asyncio
-
     from app.services.rag.ingestion import ingest_document
 
-    # Detached rather than a BackgroundTask: this endpoint returns 202 straight
-    # away and the caller polls the document's status.
-    asyncio.create_task(
-        ingest_document(
-            document_id=document_id,
-            course_id=document["course_id"],
-            file_url=document["file_url"],
-            file_name=document["file_name"],
-            source_type=document["source_type"],
-            exam_type=document.get("exam_type"),
-            year=document.get("year"),
-        )
+    background_tasks.add_task(
+        ingest_document,
+        document_id=document_id,
+        course_id=document["course_id"],
+        file_url=document["file_url"],
+        file_name=document["file_name"],
+        source_type=document["source_type"],
+        exam_type=document.get("exam_type"),
+        year=document.get("year"),
     )
     return {
         "status": "processing",
@@ -352,6 +348,7 @@ async def reindex_document(
 @router.post("/courses/{course_id}/reindex-all", status_code=status.HTTP_202_ACCEPTED)
 async def reindex_all_course_documents(
     course_id: str,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_role("admin", "teacher")),
 ):
     """Trigger background re-indexing for all materials/documents belonging to a course."""
@@ -369,7 +366,6 @@ async def reindex_all_course_documents(
     if not docs:
         return {"status": "success", "message": "No documents to re-index", "count": 0}
 
-    import asyncio
     from app.services.rag.ingestion import ingest_document
 
     supabase.table("content_documents").update(
@@ -377,16 +373,15 @@ async def reindex_all_course_documents(
     ).eq("course_id", course_id).execute()
 
     for doc in docs:
-        asyncio.create_task(
-            ingest_document(
-                document_id=doc["id"],
-                course_id=course_id,
-                file_url=doc["file_url"],
-                file_name=doc["file_name"],
-                source_type=doc["source_type"],
-                exam_type=doc.get("exam_type"),
-                year=doc.get("year"),
-            )
+        background_tasks.add_task(
+            ingest_document,
+            document_id=doc["id"],
+            course_id=course_id,
+            file_url=doc["file_url"],
+            file_name=doc["file_name"],
+            source_type=doc["source_type"],
+            exam_type=doc.get("exam_type"),
+            year=doc.get("year"),
         )
 
     return {
@@ -1018,19 +1013,25 @@ async def start_quiz_attempt(
         or []
     )
 
-    attempt = (
-        existing[0]
-        if existing
-        else (
-            supabase.table("student_quiz_attempts")
-            .insert(
-                {"student_id": current_user.id, "set_id": data.set_id, "status": "in_progress"}
+    if existing:
+        attempt = existing[0]
+    else:
+        try:
+            inserted = (
+                supabase.table("student_quiz_attempts")
+                .insert({"student_id": current_user.id, "set_id": data.set_id, "status": "in_progress"})
+                .execute()
+                .data
             )
-            .execute()
-            .data
-            or [{}]
-        )[0]
-    )
+            if not inserted:
+                raise ValueError("Insert returned empty data")
+            attempt = inserted[0]
+        except Exception as exc:
+            logger.exception("Failed to create quiz attempt for set %s", data.set_id)
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                f"Could not create quiz attempt: {exc}"
+            ) from exc
 
     attempt["questions"] = _load_questions(data.set_id, hide_answers=True)
     attempt["results"] = []

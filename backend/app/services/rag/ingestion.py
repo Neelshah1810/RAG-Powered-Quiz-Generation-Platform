@@ -247,7 +247,7 @@ _PYQ_SYSTEM = (
 _PYQ_MAX_CHARS = 60_000
 
 
-def extract_pyq_questions(text: str, exam_type: Optional[str], year: Optional[int]) -> dict:
+async def extract_pyq_questions(text: str, exam_type: Optional[str], year: Optional[int]) -> dict:
     """
     Pull individual questions and their metadata out of a PYQ paper.
 
@@ -285,7 +285,7 @@ marks; otherwise keep them together with their parent.
 {body}
 --- END ---"""
 
-    parsed = complete_json(
+    parsed = await complete_json(
         system=_PYQ_SYSTEM,
         user=prompt,
         model=settings.GROQ_MODEL,
@@ -546,7 +546,7 @@ async def _ingest_pyq_structure(
         return "Indexed for retrieval, but no exam type was set, so it cannot feed a style profile."
 
     try:
-        extracted = extract_pyq_questions(text, exam_type, year)
+        extracted = await extract_pyq_questions(text, exam_type, year)
     except LLMError as exc:
         logger.warning("PYQ metadata extraction failed for %s: %s", document_id, exc)
         return f"Content indexed; question-structure extraction failed ({exc})."

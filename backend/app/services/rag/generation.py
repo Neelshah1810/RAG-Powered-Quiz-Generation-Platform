@@ -280,7 +280,7 @@ def _build_prompt(
         )
         exemplar_text = _format_exemplars(exemplars)
 
-        return f"""Draft {request.question_count} questions for a {request.exam_type} examination.
+        return f"""Draft a high-quality set of MAXIMUM {request.question_count} questions for a {request.exam_type} examination. Do not exceed this limit.
 
 TOPICS: {topics}
 ALLOWED QUESTION TYPES: {types}
@@ -298,15 +298,14 @@ RULES
 1. Every question must be fully answerable from the SOURCE blocks above.
 2. Every question must list the source id(s) it draws on in `source_ids`.
    Use the exact id strings from the SOURCE headers.
-3. Never reproduce a historical question verbatim or with trivial rewording.
+3. Never reproduce a historical question verbatim or with trivial rewording. Ensure very high quality, robust questions suitable for a formal paper.
 4. Assign each question to a section consistent with the style profile, and
-   choose marks values consistent with that section.
+   choose marks values consistent with that section. Provide a high-quality explanation/answer key.
 5. Spread cognitive levels to match the profile's distribution.
 6. For `mcq`, give exactly four options prefixed "A) ", "B) ", "C) ", "D) ",
    with exactly one correct; `correct_answer` is that option's letter alone.
 7. No two questions may test the same fact.
-8. If the sources support fewer than {request.question_count} sound questions,
-   return only the ones you can ground."""
+8. Maximum question limit is strictly {request.question_count}. If the sources support fewer sound questions, return fewer. Never return more."""
 
     # Student quiz — optional style-aware exam prep
     style_suffix = ""
@@ -318,7 +317,7 @@ RULES
     else:
         exam_line = ""
 
-    return f"""Generate {request.question_count} practice quiz questions.
+    return f"""Generate a high-quality set of MAXIMUM {request.question_count} practice quiz questions. Do not exceed this limit under any circumstances.
 
 {exam_line}TOPICS: {topics}
 QUESTION TYPES: {types}
@@ -332,15 +331,14 @@ RULES
 1. Every question must be fully answerable from the SOURCE blocks above.
 2. Every question must list the source id(s) it draws on in `source_ids`.
    Use the exact id strings from the SOURCE headers.
-3. Write a short explanation for each answer so the student learns from it.
+3. Write a high-quality, highly detailed explanation for each answer that helps the student truly understand the concept, as if they are preparing for a major exam.
 4. For `mcq`, give exactly four options prefixed "A) ", "B) ", "C) ", "D) ",
    with exactly one correct; `correct_answer` is that option's letter alone.
-5. Distractors must be plausible and drawn from the same material — never
+5. Distractors must be plausible, challenging, and drawn from the same material — never
    joke options or "none of the above".
-6. No two questions may test the same fact.
+6. No two questions may test the same fact. Ensure variety in concepts tested.
 7. Marks: 1 for mcq/true_false/fill_blank, 2-5 for written answers.
-8. If the sources support fewer than {request.question_count} sound questions,
-   return only the ones you can ground.
+8. Maximum question limit is strictly {request.question_count}. If the sources support fewer sound questions, return fewer. Never return more.
 9. Never copy a past-paper question verbatim."""
 
 
@@ -558,7 +556,7 @@ async def generate_questions(
         system = _QUIZ_SYSTEM
         temperature = 0.75
 
-    parsed = complete_json(
+    parsed = await complete_json(
         system=system,
         user=prompt,
         model=settings.GROQ_MODEL,
@@ -618,7 +616,7 @@ QUESTIONS ALREADY IN THIS SET — your new question must test something differen
     if instruction:
         prompt += f"\nADDITIONAL INSTRUCTION FOR THE REPLACEMENT: {instruction.strip()}\n"
 
-    parsed = complete_json(
+    parsed = await complete_json(
         system=_PAPER_SYSTEM if request.mode == "paper_style" else _QUIZ_SYSTEM,
         user=prompt,
         model=settings.GROQ_MODEL,

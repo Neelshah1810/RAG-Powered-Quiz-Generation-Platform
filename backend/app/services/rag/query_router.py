@@ -260,7 +260,7 @@ async def route_query(message: str, *, use_llm_fallback: bool = True) -> RoutedQ
         return routed
 
     try:
-        parsed = complete_json(
+        parsed = await complete_json(
             system=(
                 "You classify student messages for a college RAG tutor. "
                 "Pick exactly one intent. exam_type is internal/external/null. "

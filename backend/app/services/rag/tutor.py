@@ -46,9 +46,8 @@ def _format_notes_context(chunks: list[SourceChunk], limit: int = 8) -> str:
 def _safe_sources(chunks: list[SourceChunk], limit: int = 4) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for chunk in chunks:
-        if chunk.source_type and chunk.source_type not in _SAFE_SOURCE_TYPES | {None, ""}:
-            if chunk.source_type == "pyq":
-                continue
+        if chunk.source_type == "pyq":
+            continue
         out.append(
             {
                 "document_name": chunk.document_name,
@@ -239,7 +238,7 @@ async def answer_routed(
     )
 
     try:
-        reply = complete_text(
+        reply = await complete_text(
             system=system,
             user=user_prompt,
             temperature=0.25 if routed.intent == "step_by_step" else 0.35,

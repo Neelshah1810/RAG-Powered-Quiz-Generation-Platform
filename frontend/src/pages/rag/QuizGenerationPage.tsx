@@ -403,22 +403,14 @@ export default function QuizGenerationPage() {
                         >
                           <Copy size={13} /> Copy Answer
                         </button>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm text-small"
-                          style={{ color: 'var(--color-primary)', gap: 4, fontWeight: 600 }}
-                          onClick={() => openQuizForm()}
-                        >
-                          <Sparkles size={13} /> Take Practice Quiz
-                        </button>
                       </div>
                     )}
 
                     {msg.sources && msg.sources.length > 0 && (
-                      <div style={{ marginTop: 12 }}>
-                        <div className="text-muted text-small" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+                      <details style={{ marginTop: 12 }}>
+                        <summary className="text-muted text-small" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}>
                           <BookOpen size={13} color="var(--color-primary)" /> Cited Course Material ({msg.sources.length} chunks)
-                        </div>
+                        </summary>
                         <div className="sources-panel">
                           {msg.sources.map((src, i) => (
                             <div key={i} className="source-chunk" style={{ whiteSpace: 'pre-wrap' }}>
@@ -426,7 +418,7 @@ export default function QuizGenerationPage() {
                             </div>
                           ))}
                         </div>
-                      </div>
+                      </details>
                     )}
                   </div>
                   {!isAssistant && (

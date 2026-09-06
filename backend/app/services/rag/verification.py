@@ -165,7 +165,7 @@ async def verify_question_set(
     for start in range(0, len(questions), _BATCH_SIZE):
         batch = questions[start : start + _BATCH_SIZE]
         try:
-            parsed = complete_json(
+            parsed = await complete_json(
                 system=_SYSTEM,
                 user=(
                     "Judge each question below against its own source passages.\n\n"
