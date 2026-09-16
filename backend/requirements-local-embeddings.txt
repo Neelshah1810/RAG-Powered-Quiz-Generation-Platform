@@ -1,0 +1,28 @@
+# ============================================================
+# Academix AI — Optional: local (offline) embeddings
+#
+#   pip install -r requirements-local-embeddings.txt
+#   then set EMBEDDING_PROVIDER=local in backend/.env
+#
+# This is the best-quality, zero-cost embedding option: `all-MiniLM-L6-v2`
+# runs on the CPU, needs no API key, and emits the 384-dimension vectors the
+# `content_chunks.embedding` column expects.
+#
+# It is kept out of requirements.txt because torch ships native libraries:
+#
+#   * ~250 MB download, and the model itself another ~90 MB on first use.
+#   * On WINDOWS it needs the Microsoft Visual C++ Redistributable. Without it
+#     the install succeeds but `import torch` fails at runtime with
+#     "OSError: [WinError 126] ... c10.dll". Install it from
+#     https://aka.ms/vs/17/release/vc_redist.x64.exe and reopen your terminal.
+#
+# If neither this nor a Jina API key is available, the app falls back to the
+# `hash` provider, which keeps retrieval working but noticeably worse — see
+# app/services/rag/embeddings.py.
+#
+# After switching provider, re-index every document: vectors from different
+# models are not comparable. POST /api/rag/documents/{id}/reindex per document.
+# ============================================================
+
+sentence-transformers>=3.1.0
+torch>=2.4.0
