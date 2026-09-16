@@ -169,8 +169,8 @@ Generates an interactive, drill-down mind map from a single indexed document. Us
 {
   "material_id": "uuid",
   "topic": "optional specific concept",
-  "max_depth": 3,
-  "max_children_per_node": 5
+  "max_depth": 4,
+  "max_children_per_node": 6
 }
 ```
 
@@ -178,19 +178,20 @@ Generates an interactive, drill-down mind map from a single indexed document. Us
 |---|---|---|---|
 | `material_id` | `string` | *required* | UUID of a `content_documents` row with `status='indexed'` |
 | `topic` | `string?` | `null` | Optional focus area |
-| `max_depth` | `int` | `3` | 1–5. Deepest recursion allowed |
-| `max_children_per_node` | `int` | `5` | 1–10. Breadth limit |
+| `max_depth` | `int` | `4` | 1–5. Deepest recursion allowed |
+| `max_children_per_node` | `int` | `6` | 1–10. Breadth limit |
 
-**Response:** A JSON object representing the saved `mindmaps` row, including the generated `tree` of `MindmapNode`s.
+**Response:** A JSON object representing the saved `mindmaps` row (optional persistence), including the generated `tree` of `MindmapNode`s.
 
 #### How to test
 
 1. Log in and navigate to the RAG Chat / Quiz Generation page.
 2. Ensure you have a course selected and at least one document uploaded in Classwork and marked as indexed.
-3. Click the "Generate a mind map" chip in the chat window.
+3. Type "generate a mind map" or click the suggestion chip. (Smart intent routing intercepts this and opens the document picker).
 4. Select a document from the dropdown and optionally provide a topic.
 5. Click **Generate Mind Map**.
-6. Once the card renders, click on any child node with a chevron to drill down. Use the breadcrumb bar or the back button (top left of the card) to navigate back and confirm the parent state is correctly restored.
+6. **Interactive Navigation:** Click on any child node with a chevron to drill down. Use the breadcrumb bar or the back button to navigate back up.
+7. **Fullscreen Mode:** Click the Expand icon (↗) in the mind map header to view deeply nested, expanded trees in a responsive grid overlay.
 
 ### `GET /api/rag/mindmap/{id}`
 
