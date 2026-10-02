@@ -249,6 +249,7 @@ async def create_assignment(
     due_at: Optional[str] = None,
     max_points: int = 100,
     topic_tag: Optional[str] = None,
+    allow_hand_in: bool = False,
 ) -> dict:
     result = (
         get_supabase_admin()
@@ -263,6 +264,7 @@ async def create_assignment(
                 "due_at": due_at,
                 "max_points": max_points,
                 "topic_tag": topic_tag,
+                "allow_hand_in": allow_hand_in,
             }
         )
         .execute()

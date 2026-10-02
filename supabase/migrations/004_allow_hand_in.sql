@@ -1,0 +1,3 @@
+BEGIN;
+ALTER TABLE public.assignments ADD COLUMN IF NOT EXISTS allow_hand_in BOOLEAN NOT NULL DEFAULT false;
+COMMIT;

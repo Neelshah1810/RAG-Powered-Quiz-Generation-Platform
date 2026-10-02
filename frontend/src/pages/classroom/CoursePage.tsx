@@ -9,10 +9,11 @@ import { useAuth } from '@/contexts/AuthContext'
 import api from '@/lib/api'
 import type { Course, StreamItem, Material, Assignment, Enrollment } from '@/lib/types'
 import {
-  ArrowLeft, Upload, Plus, FileText, ClipboardList, Clock, Download, RefreshCw, X, CheckCircle2, AlertCircle, Trash2, BookOpen
+  ArrowLeft, Upload, Plus, FileText, ClipboardList, Clock, Download, RefreshCw, X, CheckCircle2, AlertCircle, Trash2, BookOpen, Eye
 } from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
+import FilePreviewModal from '@/components/common/FilePreviewModal'
 
 type Tab = 'stream' | 'classwork' | 'my-materials' | 'people'
 
@@ -76,6 +77,11 @@ export default function CoursePage() {
   const [assignInstructions, setAssignInstructions] = useState('')
   const [assignDue, setAssignDue] = useState('')
   const [assignPoints, setAssignPoints] = useState(100)
+  const [assignAllowHandIn, setAssignAllowHandIn] = useState(false)
+  const [assignAttachments, setAssignAttachments] = useState<{file_url: string; file_name: string; preview_url: string; download_url: string}[]>([])
+  const [assignAttachUploading, setAssignAttachUploading] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewFileName, setPreviewFileName] = useState('')
 
   // Drag and drop / Batch Upload states
   const [selectedFiles, setSelectedFiles] = useState<BatchFileItem[]>([])
@@ -281,13 +287,31 @@ export default function CoursePage() {
         instructions: assignInstructions,
         due_at: assignDue || null,
         max_points: assignPoints,
+        allow_hand_in: assignAllowHandIn,
+        attachment_urls: assignAttachments.map(a => a.file_url),
       })
       toast.success('Assignment created')
       setShowAssignment(false)
-      setAssignTitle(''); setAssignInstructions(''); setAssignDue(''); setAssignPoints(100)
+      setAssignTitle(''); setAssignInstructions(''); setAssignDue(''); setAssignPoints(100); setAssignAllowHandIn(false); setAssignAttachments([])
       const a = await api.get(`/classroom/${courseId}/assignments`)
       setAssignments(a.data || [])
     } catch { toast.error('Failed to create') }
+  }
+
+  const uploadAssignAttachment = async (file: File) => {
+    setAssignAttachUploading(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const { data } = await api.post(`/classroom/${courseId}/assignments/upload-attachment`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setAssignAttachments(prev => [...prev, data])
+      toast.success(`Attached: ${data.file_name}`)
+    } catch {
+      toast.error('Failed to upload attachment')
+    }
+    setAssignAttachUploading(false)
   }
 
   const downloadMaterial = async (materialId: string, e: React.MouseEvent) => {
@@ -301,6 +325,22 @@ export default function CoursePage() {
       }
     } catch {
       toast.error('Failed to get download link')
+    }
+  }
+
+  const previewMaterial = async (materialId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      const { data } = await api.get(`/classroom/${courseId}/materials/${materialId}/download`)
+      const url = data.preview_url || data.download_url
+      if (url) {
+        setPreviewUrl(url)
+        setPreviewFileName(data.file_name || 'Document')
+      } else {
+        toast.error(data.error || 'Preview not available')
+      }
+    } catch {
+      toast.error('Failed to load preview')
     }
   }
 
@@ -377,6 +417,21 @@ export default function CoursePage() {
       }
     } catch {
       toast.error('Failed to get download link')
+    }
+  }
+
+  const previewStudentMaterial = async (docId: string, fileName: string) => {
+    try {
+      const { data } = await api.get(`/classroom/${courseId}/student-materials/${docId}/download`)
+      const url = data.preview_url || data.download_url
+      if (url) {
+        setPreviewUrl(url)
+        setPreviewFileName(fileName || 'Document')
+      } else {
+        toast.error('Preview not available')
+      }
+    } catch {
+      toast.error('Failed to load preview')
     }
   }
 
@@ -521,15 +576,16 @@ export default function CoursePage() {
 
           <h3 style={{ marginBottom: 12 }}>Assignments</h3>
           {assignments.map(a => (
-            <div key={a.id} className="card" style={{ padding: 16, marginBottom: 8, cursor: 'pointer' }}
-              onClick={() => navigate(`/classroom/${courseId}/assignment/${a.id}`)}>
-              <div className="flex-between">
+            <div key={a.id} className="card" style={{ padding: 16, marginBottom: 8 }}>
+              <div className="flex-between" style={{ cursor: 'pointer' }}
+                onClick={() => navigate(`/classroom/${courseId}/assignment/${a.id}`)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <ClipboardList size={20} color="var(--color-primary)" />
                   <div>
                     <div className="font-medium">{a.title}</div>
                     <div className="text-muted text-small">
                       {a.due_at ? `Due ${format(new Date(a.due_at), 'MMM d')}` : 'No due date'} · {a.max_points} pts
+                      {a.allow_hand_in && <span className="badge badge-blue" style={{ marginLeft: 8, fontSize: 11 }}>Hand-in</span>}
                     </div>
                   </div>
                 </div>
@@ -537,6 +593,38 @@ export default function CoursePage() {
                   <span className="badge badge-blue">{a.submission_count || 0} submitted</span>
                 )}
               </div>
+              {/* Attachment list */}
+              {a.attachment_urls && a.attachment_urls.length > 0 && (
+                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {a.attachment_urls.map((url, idx) => {
+                    const name = url.split('/').pop() || `Attachment ${idx + 1}`
+                    return (
+                      <div key={idx} style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        background: 'var(--color-surface-2)', borderRadius: 6, padding: '5px 10px',
+                      }}>
+                        <FileText size={14} color="var(--color-primary)" />
+                        <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                        <button className="btn btn-ghost btn-icon" title="Preview" onClick={async (e) => {
+                          e.stopPropagation()
+                          try {
+                            const { data } = await api.get(`/classroom/${courseId}/assignments/${a.id}/attachments/${idx}/download`)
+                            setPreviewUrl(data.preview_url || data.download_url)
+                            setPreviewFileName(data.file_name || name)
+                          } catch { toast.error('Preview failed') }
+                        }}><Eye size={14} /></button>
+                        <button className="btn btn-ghost btn-icon" title="Download" onClick={async (e) => {
+                          e.stopPropagation()
+                          try {
+                            const { data } = await api.get(`/classroom/${courseId}/assignments/${a.id}/attachments/${idx}/download`)
+                            window.open(data.download_url, '_blank')
+                          } catch { toast.error('Download failed') }
+                        }}><Download size={14} /></button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           ))}
 
@@ -585,6 +673,9 @@ export default function CoursePage() {
                         <RefreshCw size={18} className={busy ? 'spin' : undefined} />
                       </button>
                     )}
+                    <button className="btn btn-ghost btn-icon" onClick={(e) => previewMaterial(m.id, e)} title="Preview">
+                      <Eye size={18} />
+                    </button>
                     <button className="btn btn-ghost btn-icon" onClick={(e) => downloadMaterial(m.id, e)} title="Download">
                       <Download size={18} />
                     </button>
@@ -646,6 +737,9 @@ export default function CoursePage() {
                     <span className={`badge ${statusBadgeClass(smBusy ? 'processing' : (sm.status === 'indexed' ? 'indexed' : sm.status))}`}>
                       {smBusy ? 'indexing…' : sm.status === 'indexed' ? `indexed${sm.chunk_count ? ` · ${sm.chunk_count} chunks` : ''}` : sm.status}
                     </span>
+                    <button className="btn btn-ghost btn-icon" onClick={() => previewStudentMaterial(sm.id, sm.file_name)} title="Preview">
+                      <Eye size={18} />
+                    </button>
                     <button className="btn btn-ghost btn-icon" onClick={() => downloadStudentMaterial(sm.id)} title="Download">
                       <Download size={18} />
                     </button>
@@ -878,12 +972,87 @@ export default function CoursePage() {
                   <input className="input" type="number" value={assignPoints} onChange={e => setAssignPoints(Number(e.target.value))} />
                 </div>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+                <input 
+                  type="checkbox" 
+                  id="allowHandIn" 
+                  checked={assignAllowHandIn} 
+                  onChange={e => setAssignAllowHandIn(e.target.checked)} 
+                  style={{ width: 16, height: 16, cursor: 'pointer' }}
+                />
+                <label htmlFor="allowHandIn" style={{ cursor: 'pointer', margin: 0, userSelect: 'none' }}>
+                  Allow Hand-in (Students can upload work)
+                </label>
+              </div>
+
+              {/* Attachment upload section */}
+              <div className="input-group" style={{ marginTop: 4 }}>
+                <label className="input-label">Attachments (optional)</label>
+                <div
+                  style={{
+                    border: '2px dashed var(--color-border)',
+                    borderRadius: 8,
+                    padding: '12px 16px',
+                    cursor: assignAttachUploading ? 'not-allowed' : 'pointer',
+                    textAlign: 'center',
+                    fontSize: 13,
+                    color: 'var(--color-text-2)',
+                    transition: 'border-color 0.2s',
+                  }}
+                  onClick={() => {
+                    if (assignAttachUploading) return
+                    const inp = document.createElement('input')
+                    inp.type = 'file'
+                    inp.multiple = true
+                    inp.onchange = async (e) => {
+                      const files = (e.target as HTMLInputElement).files
+                      if (!files) return
+                      for (const f of Array.from(files)) {
+                        await uploadAssignAttachment(f)
+                      }
+                    }
+                    inp.click()
+                  }}
+                >
+                  {assignAttachUploading ? (
+                    <span>Uploading…</span>
+                  ) : (
+                    <span><Upload size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Click to attach files</span>
+                  )}
+                </div>
+                {assignAttachments.length > 0 && (
+                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {assignAttachments.map((att, i) => (
+                      <div key={i} style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        background: 'var(--color-surface-2)', borderRadius: 6,
+                        padding: '6px 10px',
+                      }}>
+                        <FileText size={14} color="var(--color-primary)" />
+                        <span style={{ flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {att.file_name}
+                        </span>
+                        <button className="btn btn-ghost btn-icon" title="Preview"
+                          onClick={() => { setPreviewUrl(att.preview_url); setPreviewFileName(att.file_name) }}>
+                          <Eye size={14} />
+                        </button>
+                        <button className="btn btn-ghost btn-icon" title="Remove"
+                          onClick={() => setAssignAttachments(prev => prev.filter((_, j) => j !== i))}
+                          style={{ color: 'var(--color-danger)' }}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={() => setShowAssignment(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={createAssignment} disabled={!assignTitle}>
+              <button className="btn btn-primary" onClick={createAssignment} disabled={!assignTitle || assignAttachUploading}>
                 Create
               </button>
+
             </div>
           </div>
         </div>
@@ -979,6 +1148,15 @@ export default function CoursePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* File Preview Modal */}
+      {previewUrl && (
+        <FilePreviewModal 
+          url={previewUrl} 
+          fileName={previewFileName} 
+          onClose={() => setPreviewUrl(null)} 
+        />
       )}
     </div>
   )

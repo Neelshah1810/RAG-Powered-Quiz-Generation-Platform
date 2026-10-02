@@ -60,6 +60,7 @@ class MaterialResponse(BaseModel):
 
 class DownloadResponse(BaseModel):
     download_url: str
+    preview_url: Optional[str] = None
     file_name: str
     expires_in_seconds: int
 
@@ -73,6 +74,7 @@ class AssignmentCreate(BaseModel):
     due_at: Optional[datetime] = None
     max_points: int = Field(default=100, ge=1, le=1000)
     topic_tag: Optional[str] = None
+    allow_hand_in: bool = False
 
 
 class AssignmentUpdate(BaseModel):
@@ -82,6 +84,7 @@ class AssignmentUpdate(BaseModel):
     due_at: Optional[datetime] = None
     max_points: Optional[int] = Field(default=None, ge=1, le=1000)
     topic_tag: Optional[str] = None
+    allow_hand_in: Optional[bool] = None
     # Explicitly clear a due date — `due_at: None` alone is indistinguishable
     # from "not supplied" once optional fields are stripped.
     clear_due_date: bool = False
@@ -97,6 +100,7 @@ class AssignmentResponse(BaseModel):
     due_at: Optional[datetime] = None
     max_points: int = 100
     topic_tag: Optional[str] = None
+    allow_hand_in: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     author_name: Optional[str] = None

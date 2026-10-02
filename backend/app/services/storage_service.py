@@ -123,6 +123,7 @@ def split_reference(file_url: str, default_bucket: str) -> tuple[str, str]:
         settings.BUCKET_PYQ,
         settings.BUCKET_SUBMISSIONS,
         settings.BUCKET_AVATARS,
+        settings.BUCKET_STUDENT_MATERIALS,
         # The earliest build wrote into a bucket simply called "materials";
         # keep reading those rows rather than orphaning them.
         "materials",

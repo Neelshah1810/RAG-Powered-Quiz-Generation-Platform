@@ -6,9 +6,10 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/lib/api'
 import type { Assignment, Submission } from '@/lib/types'
-import { ArrowLeft, ClipboardList, Download, Upload } from 'lucide-react'
+import { ArrowLeft, ClipboardList, Download, Upload, Eye, FileText } from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
+import FilePreviewModal from '@/components/common/FilePreviewModal'
 
 type AssignmentDetail = Assignment & {
   my_status?: string
@@ -30,6 +31,8 @@ export default function AssignmentPage() {
   const [textResponse, setTextResponse] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewFileName, setPreviewFileName] = useState('')
   const [gradeDrafts, setGradeDrafts] = useState<Record<string, { points: string; feedback: string }>>({})
 
   const isStaff = user?.role === 'teacher' || user?.role === 'admin'
@@ -133,6 +136,21 @@ export default function AssignmentPage() {
     }
   }
 
+  const previewSubmission = async (submissionId: string, fileName: string) => {
+    try {
+      const { data } = await api.get(`/classroom/submissions/${submissionId}/download`)
+      const url = data.preview_url || data.download_url
+      if (url) {
+        setPreviewUrl(url)
+        setPreviewFileName(fileName || 'Document')
+      } else {
+        toast.error('Preview not available')
+      }
+    } catch {
+      toast.error('Failed to load preview')
+    }
+  }
+
   if (loading) return <div className="skeleton" style={{ height: 360, borderRadius: 12 }} />
   if (!assignment) {
     return (
@@ -168,6 +186,39 @@ export default function AssignmentPage() {
               <p style={{ marginTop: 14, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
                 {assignment.instructions}
               </p>
+            )}
+            {/* Attachments */}
+            {assignment.attachment_urls && assignment.attachment_urls.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <p className="text-muted text-small" style={{ marginBottom: 6, fontWeight: 600 }}>Attachments</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {assignment.attachment_urls.map((url, idx) => {
+                    const name = url.split('/').pop() || `Attachment ${idx + 1}`
+                    return (
+                      <div key={idx} style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        background: 'var(--color-surface-2)', borderRadius: 6, padding: '6px 12px',
+                      }}>
+                        <FileText size={16} color="var(--color-primary)" />
+                        <span style={{ flex: 1, fontSize: 13 }}>{name}</span>
+                        <button className="btn btn-ghost btn-icon" title="Preview" onClick={async () => {
+                          try {
+                            const { data } = await api.get(`/classroom/${courseId}/assignments/${assignmentId}/attachments/${idx}/download`)
+                            setPreviewUrl(data.preview_url || data.download_url)
+                            setPreviewFileName(data.file_name || name)
+                          } catch { toast.error('Preview failed') }
+                        }}><Eye size={16} /></button>
+                        <button className="btn btn-ghost btn-icon" title="Download" onClick={async () => {
+                          try {
+                            const { data } = await api.get(`/classroom/${courseId}/assignments/${assignmentId}/attachments/${idx}/download`)
+                            window.open(data.download_url, '_blank')
+                          } catch { toast.error('Download failed') }
+                        }}><Download size={16} /></button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -207,7 +258,10 @@ export default function AssignmentPage() {
               {mySubmission?.file_name && (
                 <p style={{ marginTop: 8 }}>
                   File: <strong>{mySubmission.file_name}</strong>{' '}
-                  <button className="btn btn-ghost btn-icon" onClick={() => downloadSubmission(mySubmission.id)}>
+                  <button className="btn btn-ghost btn-icon" onClick={() => previewSubmission(mySubmission.id, mySubmission.file_name || '')} title="Preview">
+                    <Eye size={16} />
+                  </button>
+                  <button className="btn btn-ghost btn-icon" onClick={() => downloadSubmission(mySubmission.id)} title="Download">
                     <Download size={16} />
                   </button>
                 </p>
@@ -230,11 +284,13 @@ export default function AssignmentPage() {
                   placeholder="Type your answer..."
                   disabled={submitted && !graded} />
               </div>
-              <div className="input-group">
-                <label className="input-label">Attach file (optional)</label>
-                <input type="file" className="input" onChange={e => setFile(e.target.files?.[0] || null)}
-                  disabled={submitted && !graded} />
-              </div>
+              {assignment.allow_hand_in !== false && (
+                <div className="input-group">
+                  <label className="input-label">Attach file (optional)</label>
+                  <input type="file" className="input" onChange={e => setFile(e.target.files?.[0] || null)}
+                    disabled={submitted && !graded} />
+                </div>
+              )}
               <button className="btn btn-primary" onClick={submitWork}
                 disabled={submitting || (submitted && !graded && !file && !textResponse.trim())}>
                 <Upload size={16} /> {submitted ? 'Resubmit' : 'Turn in'}
@@ -277,10 +333,14 @@ export default function AssignmentPage() {
                         <p style={{ marginBottom: 8, whiteSpace: 'pre-wrap' }}>{s.text_response}</p>
                       )}
                       {s.file_url && (
-                        <button className="btn btn-ghost" onClick={() => downloadSubmission(s.id)}
-                          style={{ marginBottom: 10 }}>
-                          <Download size={14} /> {s.file_name || 'Download file'}
-                        </button>
+                        <div style={{ marginBottom: 10 }}>
+                          <button className="btn btn-ghost" onClick={() => previewSubmission(s.id!, s.file_name || '')} title="Preview">
+                            <Eye size={14} /> Preview file
+                          </button>
+                          <button className="btn btn-ghost" onClick={() => downloadSubmission(s.id!)} title="Download">
+                            <Download size={14} /> {s.file_name || 'Download file'}
+                          </button>
+                        </div>
                       )}
                       <div className="grid-2" style={{ gap: 10 }}>
                         <div className="input-group">
@@ -313,6 +373,15 @@ export default function AssignmentPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* File Preview Modal */}
+      {previewUrl && (
+        <FilePreviewModal 
+          url={previewUrl} 
+          fileName={previewFileName} 
+          onClose={() => setPreviewUrl(null)} 
+        />
       )}
     </div>
   )

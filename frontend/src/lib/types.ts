@@ -105,6 +105,9 @@ export interface Assignment {
   author_name?: string
   submission_count?: number
   graded_count?: number
+  allow_hand_in?: boolean
+  my_status?: string
+  my_submitted_at?: string
 }
 
 export interface Submission {

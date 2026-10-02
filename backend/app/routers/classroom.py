@@ -353,6 +353,10 @@ async def download_material(
             settings.BUCKET_MATERIALS,
             download_name=material.get("file_name"),
         )
+        preview_url = storage_service.create_signed_url(
+            material["file_url"],
+            settings.BUCKET_MATERIALS,
+        )
     except storage_service.StorageError as exc:
         logger.error("Could not sign material %s: %s", material_id, exc)
         raise HTTPException(
@@ -363,6 +367,7 @@ async def download_material(
 
     return DownloadResponse(
         download_url=url,
+        preview_url=preview_url,
         file_name=material.get("file_name") or "download",
         expires_in_seconds=settings.SIGNED_URL_TTL_SECONDS,
     )
@@ -533,6 +538,10 @@ async def download_student_material(
             settings.BUCKET_STUDENT_MATERIALS,
             download_name=doc.get("file_name"),
         )
+        preview_url = storage_service.create_signed_url(
+            doc["file_url"],
+            settings.BUCKET_STUDENT_MATERIALS,
+        )
     except storage_service.StorageError as exc:
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY,
@@ -541,6 +550,7 @@ async def download_student_material(
 
     return {
         "download_url": url,
+        "preview_url": preview_url,
         "file_name": doc.get("file_name") or "download",
         "expires_in_seconds": settings.SIGNED_URL_TTL_SECONDS,
     }
@@ -591,6 +601,59 @@ async def delete_student_material(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@router.post(
+    "/{course_id}/assignments/upload-attachment",
+    status_code=status.HTTP_200_OK,
+)
+async def upload_assignment_attachment(
+    course_id: str,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_role("admin", "teacher")),
+):
+    """
+    Upload a file attachment for an assignment.
+    Returns preview_url and download_url (signed) along with the raw file_url
+    to store in assignment.attachment_urls.
+    """
+    settings = get_settings()
+    authz.assert_course_staff(course_id, current_user)
+
+    file_name = file.filename or "attachment"
+    file_bytes = await file.read()
+    storage_service.assert_upload_allowed(file_name, len(file_bytes))
+
+    key = storage_service.build_object_key(course_id, current_user.id, file_name=file_name)
+
+    try:
+        file_url = storage_service.upload_bytes(
+            settings.BUCKET_MATERIALS, key, file_bytes, file.content_type
+        )
+    except storage_service.StorageError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Could not upload attachment: {exc}",
+        ) from exc
+
+    try:
+        download_url = storage_service.create_signed_url(
+            file_url, settings.BUCKET_MATERIALS, download_name=file_name
+        )
+        preview_url = storage_service.create_signed_url(
+            file_url, settings.BUCKET_MATERIALS
+        )
+    except storage_service.StorageError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Could not sign attachment URL: {exc}",
+        ) from exc
+
+    return {
+        "file_url": file_url,
+        "file_name": file_name,
+        "download_url": download_url,
+        "preview_url": preview_url,
+    }
+
 
 @router.get("/{course_id}/assignments", response_model=list[AssignmentResponse])
 async def list_assignments(
@@ -637,6 +700,7 @@ async def create_assignment(
         due_at=data.due_at.isoformat() if data.due_at else None,
         max_points=data.max_points,
         topic_tag=data.topic_tag,
+        allow_hand_in=data.allow_hand_in,
     )
 
     # PRD §10: assignment due dates auto-populate the Scheduler.
@@ -658,6 +722,50 @@ async def create_assignment(
     assignment["submission_count"] = 0
     assignment["graded_count"] = 0
     return assignment
+
+
+@router.get(
+    "/{course_id}/assignments/{assignment_id}/attachments/{attachment_index}/download",
+)
+async def download_assignment_attachment(
+    course_id: str,
+    assignment_id: str,
+    attachment_index: int,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get signed preview + download URLs for an assignment attachment."""
+    settings = get_settings()
+    authz.assert_course_member(course_id, current_user)
+    authz.assert_assignment_in_course(assignment_id, course_id)
+
+    assignment = await classroom_service.get_assignment(assignment_id)
+    if not assignment:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Assignment not found")
+
+    attachment_urls = assignment.get("attachment_urls") or []
+    if attachment_index < 0 or attachment_index >= len(attachment_urls):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Attachment not found")
+
+    file_url = attachment_urls[attachment_index]
+    file_name = file_url.split("/")[-1] if "/" in file_url else "attachment"
+
+    try:
+        download_url = storage_service.create_signed_url(
+            file_url, settings.BUCKET_MATERIALS, download_name=file_name
+        )
+        preview_url = storage_service.create_signed_url(
+            file_url, settings.BUCKET_MATERIALS
+        )
+    except storage_service.StorageError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Could not retrieve attachment: {exc}"
+        ) from exc
+
+    return {
+        "download_url": download_url,
+        "preview_url": preview_url,
+        "file_name": file_name,
+    }
 
 
 @router.get(
@@ -905,6 +1013,10 @@ async def download_submission(
             settings.BUCKET_SUBMISSIONS,
             download_name=submission.get("file_name"),
         )
+        preview_url = storage_service.create_signed_url(
+            submission["file_url"],
+            settings.BUCKET_SUBMISSIONS,
+        )
     except storage_service.StorageError as exc:
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY, f"The file could not be retrieved. {exc}"
@@ -912,6 +1024,7 @@ async def download_submission(
 
     return DownloadResponse(
         download_url=url,
+        preview_url=preview_url,
         file_name=submission.get("file_name") or "submission",
         expires_in_seconds=settings.SIGNED_URL_TTL_SECONDS,
     )
