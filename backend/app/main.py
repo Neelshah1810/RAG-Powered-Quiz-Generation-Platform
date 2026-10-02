@@ -34,8 +34,8 @@ async def lifespan(app: FastAPI):
     if settings.PRELOAD_EMBEDDING_MODEL:
         try:
             from app.services.rag.embeddings import get_embedding_model
-            get_embedding_model()
-            print(f"   [+] Embedding model loaded: {settings.EMBEDDING_MODEL}")
+            provider = get_embedding_model()
+            print(f"   [+] Embedding provider loaded: {provider.describe()}")
         except Exception as e:
             print(f"   [!] Embedding model failed to load: {e}")
             print(f"      RAG features will not work until this is resolved.")

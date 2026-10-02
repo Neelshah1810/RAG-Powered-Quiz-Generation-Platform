@@ -138,8 +138,9 @@ class LocalEmbeddingProvider(EmbeddingProvider):
 class JinaEmbeddingProvider(EmbeddingProvider):
     name = "jina"
 
-    # Jina rejects oversized batches; 64 keeps requests comfortably small.
-    API_BATCH = 64
+    # Keep batches at 32 to stay well under Jina's 100k token/min rate limit.
+    # The retry logic in _request handles the rare 429 if a document is very large.
+    API_BATCH = 32
 
     def __init__(self, api_key: str, model: str, base_url: str, dimension: int) -> None:
         super().__init__(dimension)
@@ -161,32 +162,54 @@ class JinaEmbeddingProvider(EmbeddingProvider):
             "embedding_type": "float",
             "input": texts,
         }
-        try:
-            response = httpx.post(
-                self.base_url,
-                json=payload,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                timeout=60.0,
-            )
-        except httpx.HTTPError as exc:
-            raise EmbeddingError(f"Jina embedding request failed: {exc}") from exc
 
-        if response.status_code != 200:
-            raise EmbeddingError(
-                f"Jina embedding API returned {response.status_code}: {response.text[:300]}"
-            )
+        # Retry up to 5 times on 429 rate-limit responses with exponential backoff.
+        max_retries = 5
+        wait = 15  # seconds — start conservative, doubles each retry
+        for attempt in range(max_retries):
+            try:
+                response = httpx.post(
+                    self.base_url,
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=60.0,
+                )
+            except httpx.HTTPError as exc:
+                raise EmbeddingError(f"Jina embedding request failed: {exc}") from exc
 
-        rows = response.json().get("data", [])
-        if len(rows) != len(texts):
-            raise EmbeddingError(
-                f"Jina returned {len(rows)} embeddings for {len(texts)} inputs"
-            )
-        # The API does not guarantee response order, but does return an index.
-        rows.sort(key=lambda r: r.get("index", 0))
-        return [_l2_normalise([float(x) for x in r["embedding"]]) for r in rows]
+            if response.status_code == 429:
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        "Jina rate limit hit (attempt %d/%d). Waiting %ds before retry...",
+                        attempt + 1, max_retries, wait,
+                    )
+                    import time
+                    time.sleep(wait)
+                    wait = min(wait * 2, 120)  # cap at 2 minutes
+                    continue
+                raise EmbeddingError(
+                    f"Jina rate limit persisted after {max_retries} retries. "
+                    "Consider uploading smaller documents or upgrading your Jina plan."
+                )
+
+            if response.status_code != 200:
+                raise EmbeddingError(
+                    f"Jina embedding API returned {response.status_code}: {response.text[:300]}"
+                )
+
+            rows = response.json().get("data", [])
+            if len(rows) != len(texts):
+                raise EmbeddingError(
+                    f"Jina returned {len(rows)} embeddings for {len(texts)} inputs"
+                )
+            # The API does not guarantee response order, but does return an index.
+            rows.sort(key=lambda r: r.get("index", 0))
+            return [_l2_normalise([float(x) for x in r["embedding"]]) for r in rows]
+
+        raise EmbeddingError("Jina embedding request failed after all retries.")
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:
