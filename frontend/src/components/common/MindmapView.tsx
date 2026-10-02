@@ -1,365 +1,570 @@
-import React, { useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react'
-import { ChevronRight, ChevronLeft, LayoutTemplate, Maximize2, X } from 'lucide-react'
+// ============================================================
+// Academix AI — Mind Map (light theme, NotebookLM-style)
+// Architecture: single wrapper div holds both SVG edges +
+// HTML node divs. Imperative DOM transforms for drag.
+// ============================================================
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useImperativeHandle,
+  forwardRef,
+  useRef,
+  useMemo,
+  useLayoutEffect,
+} from 'react'
+import { Maximize2, X, Plus, Minus, Maximize } from 'lucide-react'
 
+// ──────────────────────────────────────────────────────────────
+// Public types
+// ──────────────────────────────────────────────────────────────
 export interface MindmapNode {
   title: string
   description: string
   children?: MindmapNode[]
 }
-
+export interface MindmapViewHandle { openFullscreen: () => void }
 interface MindmapViewProps {
   rootNode: MindmapNode
-  /** If true, the expand button inside the center card is hidden.
-   *  Use this when the parent renders its own expand button externally. */
   hideInlineExpand?: boolean
 }
 
-/** Imperative handle exposed via ref — lets the parent open fullscreen. */
-export interface MindmapViewHandle {
-  openFullscreen: () => void
+// ──────────────────────────────────────────────────────────────
+// Colour palette (light theme)
+// ──────────────────────────────────────────────────────────────
+const C = {
+  bg:      '#f0f4ff',
+  dot:     '#d1daf5',
+  // node fills
+  f0:      '#4285F4',   // root  — solid blue
+  f1:      '#ffffff',   // L1    — white
+  f2:      '#f4f7ff',   // leaf  — pale blue
+  // borders
+  b0:      '#2563eb',
+  b1:      '#93b0f0',
+  b2:      '#c2d0f8',
+  // text
+  t0:      '#ffffff',
+  t1:      '#1e293b',
+  t2:      '#334155',
+  d0:      'rgba(255,255,255,0.78)',
+  d1:      '#64748b',
+  // connectors
+  edge:    '#93b0f0',
+  // badge
+  badge:   '#4285F4',
+  // controls
+  ctrl:    '#ffffff',
+  ctrlB:   '#dde3f0',
+  ctrlT:   '#475569',
+  ctrlH:   '#ebf0ff',
 }
 
-/* ─────────────────────────────────────────────────────────────
-   Internal renderer — shared between inline and fullscreen.
-   `isFullscreen` only controls visual sizing (larger cards,
-   grid layout for children). Navigation logic is identical.
-   ───────────────────────────────────────────────────────────── */
-interface MindmapContentProps {
-  path: MindmapNode[]
-  setPath: React.Dispatch<React.SetStateAction<MindmapNode[]>>
-  isFullscreen?: boolean
-  /** Only shown in fullscreen mode — closes the modal */
-  onClose?: () => void
-  /** Only shown in inline mode — opens fullscreen */
-  onExpand?: () => void
-  /** When true, the expand icon inside the center card is hidden */
-  hideInlineExpand?: boolean
+// ──────────────────────────────────────────────────────────────
+// Layout constants
+// ──────────────────────────────────────────────────────────────
+const NW     = 180   // node width
+const NH     = 58    // base node height
+const H_GAP  = 80    // horizontal gap between levels
+const V_GAP  = 18    // vertical gap between sibling subtrees
+const PAD    = 48    // canvas padding
+
+// ──────────────────────────────────────────────────────────────
+// Internal layout node
+// ──────────────────────────────────────────────────────────────
+interface LN {
+  id:       string        // stable path-based id
+  data:     MindmapNode
+  depth:    number
+  x:        number        // LEFT edge of card
+  y:        number        // TOP edge of card
+  w:        number
+  h:        number
+  children: LN[]
+  isCol:    boolean
 }
 
-function MindmapContent({ path, setPath, isFullscreen = false, onClose, onExpand, hideInlineExpand = false }: MindmapContentProps) {
-  const currentNode = path[path.length - 1]
-  const hasParent = path.length > 1
+// ──────────────────────────────────────────────────────────────
+// Build tree — stable IDs from path so collapse state survives
+// ──────────────────────────────────────────────────────────────
+function buildTree(
+  node:     MindmapNode,
+  depth:    number,
+  path:     string,
+  colSet:   Set<string>,
+): LN {
+  const id    = path
+  const isCol = colSet.has(id)
+  const kids  = isCol
+    ? []
+    : (node.children ?? []).map((c, i) =>
+        buildTree(c, depth + 1, `${path}/${i}`, colSet)
+      )
+  // height: base + extra for long title
+  const titleLines = Math.ceil(node.title.length / 22)
+  const h = NH + Math.max(0, titleLines - 1) * 16
+  return { id, data: node, depth, x: 0, y: 0, w: NW, h, children: kids, isCol }
+}
 
-  const goBack = () => {
-    if (hasParent) {
-      setPath(prev => prev.slice(0, -1))
+// Subtree height (used for layout)
+function subH(n: LN): number {
+  if (n.children.length === 0) return n.h
+  const ch = n.children.reduce((s, c) => s + subH(c), 0)
+  return Math.max(n.h, ch + (n.children.length - 1) * V_GAP)
+}
+
+// Assign x, y (top-left corner of each card)
+function layout(n: LN, left: number, topOfSubtree: number): void {
+  const sh  = subH(n)
+  n.x       = left
+  n.y       = topOfSubtree + (sh - n.h) / 2     // vertically centred in subtree
+  if (n.children.length === 0) return
+  const childLeft = left + n.w + H_GAP
+  let   cy        = topOfSubtree
+  for (const ch of n.children) {
+    layout(ch, childLeft, cy)
+    cy += subH(ch) + V_GAP
+  }
+}
+
+// Collect all visible nodes and parent→child edges
+function collect(n: LN, ns: LN[], es: [LN, LN][]): void {
+  ns.push(n)
+  for (const ch of n.children) {
+    es.push([n, ch])
+    collect(ch, ns, es)
+  }
+}
+
+// Bounding box
+function bbox(ns: LN[]) {
+  if (!ns.length) return { x: 0, y: 0, w: 800, h: 500 }
+  const minX = Math.min(...ns.map(n => n.x))
+  const minY = Math.min(...ns.map(n => n.y))
+  const maxX = Math.max(...ns.map(n => n.x + n.w))
+  const maxY = Math.max(...ns.map(n => n.y + n.h))
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+}
+
+// SVG cubic bezier: right-centre of source → left-centre of target
+function edgePath(a: LN, b: LN): string {
+  const x1 = a.x + a.w           // right edge centre
+  const y1 = a.y + a.h / 2
+  const x2 = b.x                 // left edge centre
+  const y2 = b.y + b.h / 2
+  const cx = (x1 + x2) / 2
+  return `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`
+}
+
+// ──────────────────────────────────────────────────────────────
+// Ctrl button
+// ──────────────────────────────────────────────────────────────
+function Btn({ onClick, title, children }: {
+  onClick: () => void; title: string; children: React.ReactNode
+}) {
+  const [h, sh] = useState(false)
+  return (
+    <button
+      onClick={onClick} title={title}
+      onMouseEnter={() => sh(true)} onMouseLeave={() => sh(false)}
+      style={{
+        width: 32, height: 32, borderRadius: 8,
+        background: h ? C.ctrlH : C.ctrl,
+        border: `1px solid ${C.ctrlB}`, color: C.ctrlT,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'pointer', transition: 'background 0.12s',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────
+// TreeCanvas
+// ──────────────────────────────────────────────────────────────
+interface CanvasProps {
+  rootNode:      MindmapNode
+  isFullscreen:  boolean
+  allowWheelZoom: boolean
+  onClose?:      () => void
+}
+
+function TreeCanvas({ rootNode, isFullscreen, allowWheelZoom, onClose }: CanvasProps) {
+  const outerRef  = useRef<HTMLDivElement>(null)   // clipping container
+  const innerRef  = useRef<HTMLDivElement>(null)   // transformed wrapper (holds SVG + nodes)
+
+  // pan/zoom stored in refs — updated imperatively for zero-lag drag
+  const tx    = useRef(PAD)
+  const ty    = useRef(PAD)
+  const sc    = useRef(1)
+  const applyTransform = useCallback(() => {
+    if (innerRef.current) {
+      innerRef.current.style.transform =
+        `translate(${tx.current}px,${ty.current}px) scale(${sc.current})`
     }
-  }
+  }, [])
 
-  const navigateTo = (node: MindmapNode) => {
-    if (node.children && node.children.length > 0) {
-      setPath(prev => [...prev, node])
+  // collapsed node ids
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+
+  // build & layout tree
+  const { tree, nodes, edges } = useMemo(() => {
+    const t = buildTree(rootNode, 0, 'r', collapsed)
+    layout(t, PAD, PAD)
+    const ns: LN[] = []; const es: [LN, LN][] = []
+    collect(t, ns, es)
+    return { tree: t, nodes: ns, edges: es }
+  }, [rootNode, collapsed])
+
+  // canvas size (SVG needs explicit dimensions)
+  const bb     = bbox(nodes)
+  const svgW   = bb.x + bb.w + PAD * 2
+  const svgH   = bb.y + bb.h + PAD * 2
+
+  // ── fit to screen ──────────────────────────────────────────
+  const fitToScreen = useCallback(() => {
+    const outer = outerRef.current
+    if (!outer || !nodes.length) return
+    const cw  = outer.clientWidth  || 800
+    const ch  = outer.clientHeight || 480
+    const pad = 40
+    const b   = bbox(nodes)
+    const ns  = Math.min(1.0, Math.min((cw - pad*2) / b.w, (ch - pad*2) / b.h))
+    tx.current = (cw - b.w * ns) / 2 - b.x * ns
+    ty.current = (ch - b.h * ns) / 2 - b.y * ns
+    sc.current = ns
+    applyTransform()
+  }, [nodes, applyTransform])
+
+  // initial fit
+  useLayoutEffect(() => { fitToScreen() }, [rootNode])   // eslint-disable-line
+  // fit after collapse/expand
+  useEffect(()        => { fitToScreen() }, [collapsed])  // eslint-disable-line
+
+  // ── drag — pure imperative, no React state ─────────────────
+  useEffect(() => {
+    let dragging = false
+    let sx = 0, sy = 0, stx = 0, sty = 0
+
+    const onDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest('[data-mm]')) return
+      dragging = true
+      sx = e.clientX; sy = e.clientY
+      stx = tx.current; sty = ty.current
+      e.preventDefault()
     }
-  }
+    const onMove = (e: MouseEvent) => {
+      if (!dragging) return
+      tx.current = stx + e.clientX - sx
+      ty.current = sty + e.clientY - sy
+      applyTransform()
+    }
+    const onUp   = () => { dragging = false }
 
-  const jumpTo = (index: number) => {
-    setPath(prev => prev.slice(0, index + 1))
-  }
+    const outer = outerRef.current
+    if (!outer) return
+    outer.addEventListener('mousedown', onDown)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup',   onUp)
+    return () => {
+      outer.removeEventListener('mousedown', onDown)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup',   onUp)
+    }
+  }, [applyTransform])
 
-  /* ── Size tokens that scale up in fullscreen ── */
-  const centerPad = isFullscreen ? '28px' : '20px'
-  const centerFontSize = isFullscreen ? '22px' : '18px'
-  const centerDescSize = isFullscreen ? '15px' : '14px'
-  const childPad = isFullscreen ? '18px 20px' : '16px'
-  const childTitleSize = isFullscreen ? '16px' : '15px'
-  const childDescSize = isFullscreen ? '14px' : '13px'
-  const maxCenterWidth = isFullscreen ? '680px' : '500px'
+  // ── wheel zoom ────────────────────────────────────────────
+  useEffect(() => {
+    if (!allowWheelZoom) return
+    const outer = outerRef.current
+    if (!outer) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      // zoom towards mouse position
+      const rect  = outer.getBoundingClientRect()
+      const mx    = e.clientX - rect.left
+      const my    = e.clientY - rect.top
+      const delta = e.deltaY > 0 ? 0.9 : 1.1
+      const ns    = Math.min(3, Math.max(0.15, sc.current * delta))
+      tx.current  = mx - (mx - tx.current) * (ns / sc.current)
+      ty.current  = my - (my - ty.current) * (ns / sc.current)
+      sc.current  = ns
+      applyTransform()
+    }
+    outer.addEventListener('wheel', onWheel, { passive: false })
+    return () => outer.removeEventListener('wheel', onWheel)
+  }, [allowWheelZoom, applyTransform])
+
+  // ── zoom buttons (always work) ────────────────────────────
+  const zoom = useCallback((factor: number) => {
+    const outer = outerRef.current
+    if (!outer) return
+    const cx = outer.clientWidth  / 2
+    const cy = outer.clientHeight / 2
+    const ns = Math.min(3, Math.max(0.15, sc.current * factor))
+    tx.current = cx - (cx - tx.current) * (ns / sc.current)
+    ty.current = cy - (cy - ty.current) * (ns / sc.current)
+    sc.current = ns
+    applyTransform()
+  }, [applyTransform])
+
+  // ── toggle collapse ───────────────────────────────────────
+  const toggle = useCallback((id: string) => {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }, [])
 
   return (
     <div
-      className="mindmap-view"
+      ref={outerRef}
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '20px',
-        alignItems: 'center',
+        position: 'relative',
         width: '100%',
-        padding: isFullscreen ? '32px 40px' : '16px',
-        /* Fullscreen needs scroll support */
-        ...(isFullscreen ? { overflowY: 'auto', maxHeight: '100%' } : {}),
+        height: isFullscreen ? '100%' : 490,
+        background: C.bg,
+        backgroundImage: `radial-gradient(circle, ${C.dot} 1px, transparent 1px)`,
+        backgroundSize: '22px 22px',
+        borderRadius: isFullscreen ? 0 : 14,
+        overflow: 'hidden',
+        cursor: 'grab',
+        userSelect: 'none',
+        fontFamily: "'Inter','Segoe UI',system-ui,sans-serif",
       }}
     >
+      {/*
+        ─────────────────────────────────────────────────────
+        Inner wrapper — ONE element that gets pan/zoom.
+        Both SVG edges AND HTML node divs live here so they
+        share the exact same transform — perfect alignment.
+        transformOrigin 0 0 so coordinates match layout.
+        ─────────────────────────────────────────────────────
+      */}
+      <div
+        ref={innerRef}
+        style={{
+          position: 'absolute',
+          top: 0, left: 0,
+          transformOrigin: '0 0',
+          // initial transform applied once layout is known
+        }}
+      >
+        {/* ── SVG layer: edges only ── */}
+        <svg
+          width={svgW}
+          height={svgH}
+          style={{ position: 'absolute', top: 0, left: 0, overflow: 'visible', pointerEvents: 'none' }}
+        >
+          {edges.map(([a, b], i) => (
+            <path
+              key={i}
+              d={edgePath(a, b)}
+              stroke={C.edge}
+              strokeWidth={2}
+              fill="none"
+              strokeLinecap="round"
+              opacity={0.75}
+            />
+          ))}
+        </svg>
 
-      {/* ── Breadcrumbs ────────────────────────────── */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', alignSelf: 'flex-start', marginBottom: '10px' }}>
-        {path.map((node, i) => (
-          <React.Fragment key={i}>
-            <button
-              onClick={() => jumpTo(i)}
-              className="text-small"
-              style={{
-                background: 'none',
-                border: 'none',
-                color: i === path.length - 1 ? 'var(--color-text)' : 'var(--color-primary)',
-                fontWeight: i === path.length - 1 ? 600 : 500,
-                cursor: i === path.length - 1 ? 'default' : 'pointer',
-                padding: 0,
-                fontSize: isFullscreen ? '14px' : undefined,
-              }}
-            >
-              {node.title}
-            </button>
-            {i < path.length - 1 && <ChevronRight size={14} color="var(--color-text-3)" />}
-          </React.Fragment>
-        ))}
-      </div>
+        {/* ── HTML layer: node cards ── */}
+        {nodes.map(n => {
+          const hasKids = n.data.children != null && n.data.children.length > 0
+          const fill   = n.depth === 0 ? C.f0 : n.depth === 1 ? C.f1 : C.f2
+          const border = n.depth === 0 ? C.b0 : n.depth === 1 ? C.b1 : C.b2
+          const txtCol = n.depth === 0 ? C.t0 : C.t1
+          const dscCol = n.depth === 0 ? C.d0 : C.d1
+          const shadow = n.depth === 0
+            ? '0 4px 18px rgba(66,133,244,0.3)'
+            : n.depth === 1 ? '0 2px 10px rgba(0,0,0,0.09)' : '0 1px 4px rgba(0,0,0,0.06)'
 
-      {/* ── Main Node Area ─────────────────────────── */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', width: '100%', maxWidth: maxCenterWidth }}>
-
-        {/* Back Button (Above Center Card) */}
-        {hasParent && (
-          <button
-            onClick={goBack}
-            className="btn btn-ghost"
-            style={{ marginBottom: '16px', borderRadius: '50%', padding: '8px' }}
-            title="Go Back"
-          >
-            <ChevronLeft size={20} />
-          </button>
-        )}
-
-        {/* Current (Center) Node */}
-        <div className="mindmap-card current" style={{
-            background: 'var(--color-surface)',
-            border: '2px solid var(--color-primary)',
-            borderRadius: '12px',
-            padding: centerPad,
-            width: '100%',
-            textAlign: 'center',
-            boxShadow: '0 4px 12px rgba(66, 133, 244, 0.15)',
-            zIndex: 2,
-            position: 'relative'
-        }}>
-          {/* Inline expand button — only shown when parent hasn't hidden it */}
-          {onExpand && !isFullscreen && !hideInlineExpand && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onExpand(); }}
-              title="Expand to Fullscreen"
+          return (
+            <div
+              key={n.id}
+              data-mm="node"
+              onClick={() => hasKids && toggle(n.id)}
               style={{
                 position: 'absolute',
-                top: '10px',
-                right: '10px',
-                background: 'var(--color-primary-bg)',
-                border: 'none',
-                borderRadius: '8px',
-                padding: '6px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--color-primary)',
-                transition: 'background 0.15s',
+                left: n.x,
+                top:  n.y,
+                width: n.w,
+                minHeight: n.h,
+                background: fill,
+                border: `1.5px solid ${border}`,
+                borderRadius: 10,
+                padding: n.depth === 0 ? '12px 16px' : '9px 14px',
+                boxSizing: 'border-box',
+                boxShadow: shadow,
+                cursor: hasKids ? 'pointer' : 'default',
+                transition: 'box-shadow 0.15s, transform 0.12s',
               }}
+              onMouseEnter={e => {
+                if (hasKids) {
+                  (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 24px rgba(66,133,244,0.25)'
+                  ;(e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)'
+                }
+              }}
+              onMouseLeave={e => {
+                ;(e.currentTarget as HTMLElement).style.boxShadow = shadow
+                ;(e.currentTarget as HTMLElement).style.transform = ''
+              }}
+              title={n.depth >= 2 ? n.data.description : ''}
             >
-              <Maximize2 size={16} />
-            </button>
-          )}
+              {/* Title */}
+              <div style={{
+                fontSize: n.depth === 0 ? 13.5 : 12.5,
+                fontWeight: n.depth === 0 ? 700 : 600,
+                color: txtCol,
+                lineHeight: 1.35,
+                marginBottom: (n.depth <= 1 && n.data.description) ? 4 : 0,
+                wordBreak: 'break-word',
+              }}>
+                {n.data.title}
+              </div>
 
-          <h3 style={{ margin: '0 0 8px 0', fontSize: centerFontSize, color: 'var(--color-text)' }}>
-            {currentNode.title}
-          </h3>
-          <p className="text-muted" style={{ margin: 0, fontSize: centerDescSize, lineHeight: '1.5' }}>
-            {currentNode.description}
-          </p>
-        </div>
-
-        {/* Connector Line to Children */}
-        {currentNode.children && currentNode.children.length > 0 && (
-          <div style={{
-            width: '2px',
-            height: '30px',
-            background: 'var(--color-border)',
-            margin: '0 auto'
-          }} />
-        )}
-
-        {/* Children Nodes — grid in fullscreen, stacked column inline */}
-        {currentNode.children && currentNode.children.length > 0 && (
-          <div style={{
-            display: isFullscreen ? 'grid' : 'flex',
-            ...(isFullscreen
-              ? { gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '14px' }
-              : { flexDirection: 'column' as const, gap: '12px' }),
-            width: '100%',
-            marginTop: '8px',
-            ...(isFullscreen ? { maxWidth: '900px' } : {}),
-          }}>
-            {currentNode.children.map((child, i) => {
-              const isExpandable = child.children && child.children.length > 0
-              return (
-                <div
-                  key={i}
-                  className={`mindmap-card child ${isExpandable ? 'expandable' : ''}`}
-                  onClick={() => navigateTo(child)}
-                  style={{
-                    background: 'var(--color-surface-2)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '10px',
-                    padding: childPad,
-                    cursor: isExpandable ? 'pointer' : 'default',
-                    transition: 'all 0.2s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    boxShadow: 'var(--shadow-1)'
-                  }}
-                >
-                  <div style={{ flex: 1, paddingRight: '12px' }}>
-                    <h4 style={{ margin: '0 0 4px 0', fontSize: childTitleSize, color: 'var(--color-text)' }}>
-                      {child.title}
-                    </h4>
-                    <p className="text-muted" style={{ margin: 0, fontSize: childDescSize }}>
-                      {child.description}
-                    </p>
-                  </div>
-                  {isExpandable && (
-                    <div style={{
-                      background: 'var(--color-primary-bg)',
-                      borderRadius: '50%',
-                      padding: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--color-primary)'
-                    }}>
-                      <ChevronRight size={18} />
-                    </div>
-                  )}
+              {/* Description — only root & L1 */}
+              {n.depth <= 1 && n.data.description && (
+                <div style={{
+                  fontSize: 11,
+                  color: dscCol,
+                  lineHeight: 1.4,
+                  wordBreak: 'break-word',
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                } as React.CSSProperties}>
+                  {n.data.description}
                 </div>
-              )
-            })}
-          </div>
-        )}
+              )}
 
-        {/* Placeholder if no children */}
-        {(!currentNode.children || currentNode.children.length === 0) && (
-           <div style={{ marginTop: '24px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-3)', fontSize: '14px' }}>
-             <LayoutTemplate size={16} /> Leaf concept reached
-           </div>
-        )}
+              {/* Expand / collapse badge */}
+              {hasKids && (
+                <div style={{
+                  position: 'absolute',
+                  right: -12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  width: 24, height: 24,
+                  borderRadius: '50%',
+                  background: C.badge,
+                  border: '2px solid #fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: '#fff',
+                  fontSize: 14, fontWeight: 800,
+                  lineHeight: 1,
+                  boxShadow: '0 2px 8px rgba(66,133,244,0.4)',
+                  zIndex: 2,
+                  pointerEvents: 'none',
+                  userSelect: 'none',
+                }}>
+                  {n.isCol ? '+' : '−'}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
 
+      {/* ── Controls ── */}
+      <div style={{
+        position: 'absolute', bottom: 16, right: 16,
+        display: 'flex', flexDirection: 'column', gap: 6, zIndex: 30,
+      }}>
+        {onClose && <Btn onClick={onClose} title="Close"><X size={15} /></Btn>}
+        <Btn onClick={() => zoom(1.15)} title="Zoom in"><Plus  size={15} /></Btn>
+        <Btn onClick={() => zoom(0.87)} title="Zoom out"><Minus size={15} /></Btn>
+        <Btn onClick={fitToScreen}      title="Fit to screen"><Maximize size={15} /></Btn>
+      </div>
+
+      {/* ── Legend ── */}
+      <div style={{
+        position: 'absolute', bottom: 14, left: 14,
+        fontSize: 11, color: '#9baacf',
+        userSelect: 'none', pointerEvents: 'none',
+      }}>
+        {allowWheelZoom ? 'Scroll to zoom · ' : ''}Drag to pan · Click node to expand/collapse
       </div>
     </div>
   )
 }
 
-/* ─────────────────────────────────────────────────────────────
-   Public component — owns the path state so it's shared
-   between the inline view and the fullscreen modal.
-   ───────────────────────────────────────────────────────────── */
+// ──────────────────────────────────────────────────────────────
+// Public MindmapView
+// ──────────────────────────────────────────────────────────────
 const MindmapView = forwardRef<MindmapViewHandle, MindmapViewProps>(
   function MindmapView({ rootNode, hideInlineExpand = false }, ref) {
-  const [path, setPath] = useState<MindmapNode[]>([rootNode])
-  const [isFullscreen, setIsFullscreen] = useState(false)
+    const [isFS, setFS] = useState(false)
 
-  /* Expose openFullscreen so the parent can trigger it via ref */
-  useImperativeHandle(ref, () => ({
-    openFullscreen: () => setIsFullscreen(true),
-  }), [])
+    useImperativeHandle(ref, () => ({ openFullscreen: () => setFS(true) }), [])
 
-  /* Close fullscreen on Esc key */
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Escape' && isFullscreen) {
-      setIsFullscreen(false)
-    }
-  }, [isFullscreen])
+    const onKey = useCallback((e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFS(false)
+    }, [])
 
-  useEffect(() => {
-    if (isFullscreen) {
-      document.addEventListener('keydown', handleKeyDown)
-      /* Prevent body scroll while modal is open */
-      document.body.style.overflow = 'hidden'
-    }
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      document.body.style.overflow = ''
-    }
-  }, [isFullscreen, handleKeyDown])
+    useEffect(() => {
+      if (isFS) {
+        document.addEventListener('keydown', onKey)
+        document.body.style.overflow = 'hidden'
+      }
+      return () => {
+        document.removeEventListener('keydown', onKey)
+        document.body.style.overflow = ''
+      }
+    }, [isFS, onKey])
 
-  return (
-    <>
-      {/* ── Inline (normal) view — unchanged behavior ── */}
-      <MindmapContent
-        path={path}
-        setPath={setPath}
-        isFullscreen={false}
-        onExpand={() => setIsFullscreen(true)}
-        hideInlineExpand={hideInlineExpand}
-      />
-
-      {/* ── Fullscreen modal overlay ── */}
-      {isFullscreen && (
-        <div
-          className="mindmap-fullscreen-overlay"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 9999,
-            background: 'rgba(0, 0, 0, 0.65)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            animation: 'fadeIn 0.2s ease',
-          }}
-          /* Click on the dark backdrop to close */
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsFullscreen(false)
-          }}
-        >
-          <div
-            className="mindmap-fullscreen-container"
-            style={{
-              background: 'var(--color-bg, #fff)',
-              borderRadius: '16px',
-              width: 'calc(100vw - 80px)',
-              maxWidth: '1100px',
-              height: 'calc(100vh - 80px)',
-              position: 'relative',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              boxShadow: '0 24px 64px rgba(0,0,0,0.25)',
-            }}
-          >
-            {/* Close button */}
+    return (
+      <>
+        {/* Inline — no wheel zoom */}
+        <div style={{ position: 'relative', width: '100%' }}>
+          <TreeCanvas rootNode={rootNode} isFullscreen={false} allowWheelZoom={false} />
+          {!hideInlineExpand && (
             <button
-              onClick={() => setIsFullscreen(false)}
-              title="Close fullscreen"
+              onClick={() => setFS(true)}
+              title="Open fullscreen"
               style={{
-                position: 'absolute',
-                top: '14px',
-                right: '14px',
-                zIndex: 10,
-                background: 'var(--color-surface-2, #f1f3f5)',
-                border: '1px solid var(--color-border)',
-                borderRadius: '10px',
-                padding: '8px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--color-text)',
-                transition: 'background 0.15s',
+                position: 'absolute', top: 10, right: 10,
+                width: 32, height: 32, borderRadius: 8,
+                background: 'rgba(255,255,255,0.9)',
+                border: `1px solid ${C.ctrlB}`, color: C.ctrlT,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', zIndex: 5,
+                boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
               }}
             >
-              <X size={20} />
+              <Maximize2 size={14} />
             </button>
+          )}
+        </div>
 
-            {/* Same content, larger sizing */}
-            <div style={{ flex: 1, overflow: 'auto' }}>
-              <MindmapContent
-                path={path}
-                setPath={setPath}
-                isFullscreen={true}
-                onClose={() => setIsFullscreen(false)}
-              />
+        {/* Fullscreen — wheel zoom ON */}
+        {isFS && (
+          <div
+            style={{
+              position: 'fixed', inset: 0, zIndex: 9999,
+              background: 'rgba(15,23,42,0.5)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+            onClick={e => { if (e.target === e.currentTarget) setFS(false) }}
+          >
+            <div style={{
+              width: 'calc(100vw - 56px)', maxWidth: 1440,
+              height: 'calc(100vh - 56px)',
+              borderRadius: 18, overflow: 'hidden',
+              boxShadow: '0 32px 80px rgba(0,0,0,0.3)',
+            }}>
+              <TreeCanvas rootNode={rootNode} isFullscreen allowWheelZoom onClose={() => setFS(false)} />
             </div>
           </div>
-        </div>
-      )}
-    </>
-  )
-})
+        )}
+      </>
+    )
+  }
+)
 
 export default MindmapView
