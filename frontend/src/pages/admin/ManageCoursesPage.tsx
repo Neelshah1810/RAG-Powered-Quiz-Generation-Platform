@@ -32,7 +32,7 @@ export default function ManageCoursesPage() {
 
   useEffect(() => {
     loadCourses()
-    api.get('/users/').then(r => setAllUsers(r.data || []))
+    api.get('/users/').then(r => setAllUsers(Array.isArray(r.data) ? r.data : []))
   }, [])
 
   // Close student dropdown on outside click

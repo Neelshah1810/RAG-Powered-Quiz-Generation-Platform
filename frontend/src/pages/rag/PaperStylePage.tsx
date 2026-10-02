@@ -116,11 +116,11 @@ export default function PaperStylePage() {
 
   useEffect(() => {
     api.get('/courses/').then(r => {
-      const list = r.data || []
+      const list = Array.isArray(r.data) ? r.data : []
       setCourses(list)
       if (list.length > 0) setSelectedCourse(list[0].id)
     })
-    api.get('/rag/sets', { params: { mode: 'paper_style' } }).then(r => setHistory(r.data || []))
+    api.get('/rag/sets', { params: { mode: 'paper_style' } }).then(r => setHistory(Array.isArray(r.data) ? r.data : []))
   }, [])
 
   const handleExamTypeChange = (type: 'internal' | 'external') => {
@@ -241,7 +241,7 @@ export default function PaperStylePage() {
 
       setResult(data)
       toast.success(`Paper Style (${examType.toUpperCase()} - ${totalMarks} Marks) saved successfully!`)
-      api.get('/rag/sets', { params: { mode: 'paper_style' } }).then(r => setHistory(r.data || []))
+      api.get('/rag/sets', { params: { mode: 'paper_style' } }).then(r => setHistory(Array.isArray(r.data) ? r.data : []))
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Failed to save paper style')
     }

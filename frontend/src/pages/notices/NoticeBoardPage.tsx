@@ -45,7 +45,7 @@ export default function NoticeBoardPage() {
   useEffect(() => { loadNotices() }, [filter])
   useEffect(() => {
     if (canPost) {
-      api.get('/courses/').then(r => setCourses(r.data || [])).catch(() => {})
+      api.get('/courses/').then(r => setCourses(Array.isArray(r.data) ? r.data : [])).catch(() => {})
     }
   }, [canPost])
 

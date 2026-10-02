@@ -47,9 +47,9 @@ export default function AssignmentPage() {
 
       if (isStaff) {
         const subs = await api.get(`/classroom/${courseId}/assignments/${assignmentId}/submissions`)
-        setSubmissions(subs.data || [])
+        setSubmissions(Array.isArray(subs.data) ? subs.data : [])
         const drafts: Record<string, { points: string; feedback: string }> = {}
-        for (const s of subs.data || []) {
+        for (const s of (Array.isArray(subs.data) ? subs.data : [])) {
           drafts[s.id] = {
             points: s.grade?.points_awarded?.toString() ?? '',
             feedback: s.grade?.feedback_text ?? '',

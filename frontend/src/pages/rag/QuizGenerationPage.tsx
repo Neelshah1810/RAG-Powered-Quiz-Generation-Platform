@@ -75,7 +75,7 @@ export default function QuizGenerationPage() {
 
   useEffect(() => {
     api.get('/courses/').then(r => {
-      const list: Course[] = r.data || []
+      const list: Course[] = Array.isArray(r.data) ? r.data : []
       setCourses(list)
       if (list.length > 0) {
         setActiveCourseId(list[0].id)
