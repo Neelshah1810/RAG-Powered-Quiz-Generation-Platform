@@ -36,7 +36,7 @@ export default function StudentDashboard() {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Welcome back, {user?.full_name?.split(' ')[0]}!</h1>
+          <h1 className="page-title">Welcome back, {user?.full_name ? user.full_name.split(' ')[0] : 'User'}!</h1>
           <p className="text-muted" style={{ marginTop: 4 }}>Here's what's happening today</p>
         </div>
       </div>
@@ -116,11 +116,11 @@ export default function StudentDashboard() {
                 <div style={{ flex: 1 }}>
                   <div className="font-medium">{event.title}</div>
                   <div className="text-muted text-small">
-                    {event.course_name} · {format(new Date(event.start_at), 'MMM d, h:mm a')}
+                    {event.course_name} · {event.start_at ? format(new Date(event.start_at), 'MMM d, h:mm a') : 'TBD'}
                   </div>
                 </div>
                 <span className="badge badge-gray" style={{ textTransform: 'capitalize' }}>
-                  {event.event_type.replace('_', ' ')}
+                  {event.event_type?.replace('_', ' ') || 'Event'}
                 </span>
               </div>
             ))}
