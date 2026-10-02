@@ -87,7 +87,7 @@ export default function TopBar() {
               }}
             >
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border)' }}>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{user?.full_name}</div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{user?.full_name || user?.email?.split('@')[0] || 'User'}</div>
                 <div className="text-muted text-small">{user?.email}</div>
                 <span className="badge badge-blue" style={{ marginTop: 4 }}>
                   {user?.role}
