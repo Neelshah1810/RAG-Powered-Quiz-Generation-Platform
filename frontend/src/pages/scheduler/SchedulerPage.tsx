@@ -47,8 +47,8 @@ export default function SchedulerPage() {
 
   useEffect(() => {
     loadEvents()
-    api.get('/courses/').then(r => setCourses(r.data || [])).catch(() => {})
-    api.get('/users/staff').then(r => setStaffList(r.data || [])).catch(() => {})
+    api.get('/courses/').then(r => setCourses(Array.isArray(r.data) ? r.data : [])).catch(() => {})
+    api.get('/users/staff').then(r => setStaffList(Array.isArray(r.data) ? r.data : [])).catch(() => {})
   }, [currentMonth])
 
   const loadEvents = async () => {
@@ -57,7 +57,7 @@ export default function SchedulerPage() {
       const start = startOfMonth(currentMonth).toISOString()
       const end = endOfMonth(currentMonth).toISOString()
       const { data } = await api.get('/scheduler/events', { params: { start_date: start, end_date: end } })
-      setEvents(data || [])
+      setEvents(Array.isArray(data) ? data : [])
     } catch { /* ignore */ }
     setLoading(false)
   }

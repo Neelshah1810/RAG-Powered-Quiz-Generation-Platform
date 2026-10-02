@@ -119,10 +119,10 @@ export default function CoursePage() {
           api.get(`/courses/${courseId}/enrollments`),
         ])
         setCourse(c.data)
-        setStream(s.data || [])
-        setMaterials(m.data || [])
-        setAssignments(a.data || [])
-        setPeople(p.data || [])
+        setStream(Array.isArray(s.data) ? s.data : [])
+        setMaterials(Array.isArray(m.data) ? m.data : [])
+        setAssignments(Array.isArray(a.data) ? a.data : [])
+        setPeople(Array.isArray(p.data) ? p.data : [])
       } catch { /* ignore */ }
       // Load student personal materials
       await refreshStudentMaterials()
@@ -274,7 +274,7 @@ export default function CoursePage() {
       setAnnounceText('')
       setShowAnnounce(false)
       const s = await api.get(`/classroom/${courseId}/stream`)
-      setStream(s.data || [])
+      setStream(Array.isArray(s.data) ? s.data : [])
     } catch { toast.error('Failed to post') }
   }
 
@@ -294,7 +294,7 @@ export default function CoursePage() {
       setShowAssignment(false)
       setAssignTitle(''); setAssignInstructions(''); setAssignDue(''); setAssignPoints(100); setAssignAllowHandIn(false); setAssignAttachments([])
       const a = await api.get(`/classroom/${courseId}/assignments`)
-      setAssignments(a.data || [])
+      setAssignments(Array.isArray(a.data) ? a.data : [])
     } catch { toast.error('Failed to create') }
   }
 
