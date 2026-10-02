@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider } from '@/contexts/AuthContext'
 import AppShell from '@/components/layout/AppShell'
+import ErrorBoundary from '@/components/ErrorBoundary'
 import RoleRoute from '@/components/RoleRoute'
 
 // Pages
@@ -31,7 +32,8 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <AuthProvider>
+        <ErrorBoundary>
+          <AuthProvider>
           <Routes>
             {/* Public */}
             <Route path="/login" element={<LoginPage />} />
@@ -61,7 +63,8 @@ export default function App() {
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
-        </AuthProvider>
+          </AuthProvider>
+        </ErrorBoundary>
       </BrowserRouter>
 
       <Toaster

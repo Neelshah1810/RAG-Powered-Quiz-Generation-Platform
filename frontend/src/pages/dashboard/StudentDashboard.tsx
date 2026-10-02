@@ -24,8 +24,8 @@ export default function StudentDashboard() {
           api.get('/courses/'),
           api.get('/scheduler/events', { params: { start_date: new Date().toISOString() } }),
         ])
-        setCourses(c.data || [])
-        setEvents((e.data || []).slice(0, 5))
+        setCourses(Array.isArray(c.data) ? c.data : [])
+        setEvents(Array.isArray(e.data) ? e.data.slice(0, 5) : [])
       } catch { /* ignore */ }
       setLoading(false)
     }
@@ -116,7 +116,7 @@ export default function StudentDashboard() {
                 <div style={{ flex: 1 }}>
                   <div className="font-medium">{event.title}</div>
                   <div className="text-muted text-small">
-                    {event.course_name} · {event.start_at ? format(new Date(event.start_at), 'MMM d, h:mm a') : 'TBD'}
+                    {event.course_name} · {event.start_at && !isNaN(new Date(event.start_at).getTime()) ? format(new Date(event.start_at), 'MMM d, h:mm a') : 'TBD'}
                   </div>
                 </div>
                 <span className="badge badge-gray" style={{ textTransform: 'capitalize' }}>
