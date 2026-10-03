@@ -21,6 +21,9 @@ export default defineConfig({
     },
   },
   preview: {
+    // Railway (and most PaaS) inject PORT and need the server on 0.0.0.0.
+    host: true,
+    port: Number(process.env.PORT) || 4173,
     allowedHosts: true,
   },
 })

@@ -83,6 +83,15 @@ npm run dev
 
 App: http://localhost:5173
 
+## Deploying to Railway
+
+Run the backend and frontend as two services.
+
+- **Backend**: root `backend`, start command `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Set the same variables as `backend/.env`, plus `FRONTEND_URL=https://<frontend>.up.railway.app` (any `*.up.railway.app` origin is already allowed by CORS; add custom domains to `EXTRA_CORS_ORIGINS`).
+- **Frontend**: root `frontend`, build `npm run build`, start `npm run preview` (binds `0.0.0.0:$PORT`). Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `VITE_API_URL=https://<backend>.up.railway.app` (`/api` is appended automatically). These are baked in at build time, so **redeploy the frontend after changing them**.
+
+If `VITE_API_URL` is missing or wrong, API calls hit the frontend itself and get `index.html` back; the app now rejects that and logs `Expected JSON ... but got HTML` in the browser console.
+
 ## Demo accounts
 
 Password for all: `password123`

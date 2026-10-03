@@ -64,11 +64,8 @@ def create_app() -> FastAPI:
     # --- CORS Middleware ---
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            settings.FRONTEND_URL,
-            "http://localhost:5173",  # Vite dev server
-            "http://localhost:3000",  # Fallback
-        ],
+        allow_origins=settings.cors_origins,
+        allow_origin_regex=settings.CORS_ORIGIN_REGEX or None,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
