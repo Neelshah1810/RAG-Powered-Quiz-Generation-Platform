@@ -909,19 +909,36 @@ textarea.input { resize: vertical; min-height: 80px; }
 .cx-body a { color: var(--color-primary); text-decoration: underline; }
 
 .cx-actions {
-  position: absolute; top: -18px; display: none; gap: 2px; z-index: 5;
+  position: absolute; top: 50%; transform: translateY(-50%);
+  display: none; gap: 2px; z-index: 5;
   background: var(--color-surface); border: 1px solid var(--color-border);
-  border-radius: 999px; padding: 2px 4px; box-shadow: var(--shadow-1);
+  border-radius: 999px; padding: 2px; box-shadow: var(--shadow-1);
 }
-.cx-row:not(.mine) .cx-actions { right: -8px; }
-.cx-row.mine .cx-actions { left: -8px; }
-.cx-row:hover .cx-actions, .cx-actions.open { display: flex; }
+/* Beside the bubble, on the side facing the middle of the chat — never over the text. */
+.cx-row:not(.mine) .cx-actions { left: calc(100% + 6px); }
+.cx-row.mine .cx-actions { right: calc(100% + 6px); }
+.cx-row:hover .cx-actions, .cx-row.picking .cx-actions { display: flex; }
 .cx-actions button {
-  border: none; background: none; cursor: pointer; font-size: 16px;
+  border: none; background: none; cursor: pointer;
   width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   color: var(--color-text-2);
 }
-.cx-actions button:hover { background: var(--color-surface-3); transform: scale(1.12); }
+.cx-actions button:hover { background: var(--color-surface-3); color: var(--color-text); }
+
+.cx-picker {
+  position: fixed; z-index: 1500; display: flex; gap: 2px; padding: 4px 6px;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: 999px; box-shadow: var(--shadow-3);
+  animation: cxPop .12s ease-out;
+}
+.cx-picker button {
+  border: none; background: none; cursor: pointer; font-size: 22px; line-height: 1;
+  width: 38px; height: 38px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .1s, background .1s;
+}
+.cx-picker button:hover { transform: scale(1.2); background: var(--color-surface-3); }
+.cx-picker button.active { background: var(--color-primary-bg); }
 
 .cx-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: -4px; position: relative; z-index: 1; }
 .cx-reaction {
@@ -1009,3 +1026,4 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 .cx-inline-icon { display: inline-block; vertical-align: -2px; margin-right: 4px; }
+@keyframes cxPop { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
