@@ -1,7 +1,8 @@
 // ============================================================
 // Academix AI — One chat message (bubble, media, poll, reactions)
 // ============================================================
-import { memo, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
 import { AlertCircle, BarChart3, FileText, Lock, SmilePlus, Trash2 } from 'lucide-react'
 import { QUICK_REACTIONS, formatBytes, initials } from '@/lib/chat'
@@ -66,6 +67,7 @@ function MessageItem({
   onReact, onVote, onClosePoll, onDelete, onOpenImage,
 }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
 
   if (m.kind === 'system') {
     return <div className="cx-system">{m.body}</div>
@@ -78,25 +80,28 @@ function MessageItem({
   const role = m.sender?.role || 'student'
 
   return (
-    <div className={`cx-row ${mine ? 'mine' : ''} ${continuation ? 'cont' : ''}`} onMouseLeave={() => setPickerOpen(false)}>
+    <div className={`cx-row ${mine ? 'mine' : ''} ${continuation ? 'cont' : ''} ${pickerOpen ? 'picking' : ''}`}>
       {!mine && (continuation
         ? <div className="cx-avatar-spacer" />
         : <div className="cx-avatar-sm" style={{ background: ROLE_COLORS[role] || '#5C6BC0' }} title={m.sender?.full_name}>
             {initials(m.sender?.full_name)}
           </div>)}
 
-      <div className="cx-bubble-wrap">
+      <div className="cx-bubble-wrap" ref={wrapRef}>
         {!m.deleted && (
-          <div className={`cx-actions ${pickerOpen ? 'open' : ''}`}>
-            {pickerOpen
-              ? QUICK_REACTIONS.map(e => (
-                  <button key={e} title={e} onClick={() => { onReact(m, myReaction === e ? null : e); setPickerOpen(false) }}>{e}</button>
-                ))
-              : <>
-                  <button title="React" onClick={() => setPickerOpen(true)}><SmilePlus size={16} /></button>
-                  {canDelete && <button title="Delete" onClick={() => onDelete(m)}><Trash2 size={15} /></button>}
-                </>}
+          <div className="cx-actions">
+            <button aria-label="React" onClick={() => setPickerOpen(o => !o)}><SmilePlus size={16} /></button>
+            {canDelete && <button aria-label="Delete" onClick={() => onDelete(m)}><Trash2 size={15} /></button>}
           </div>
+        )}
+        {pickerOpen && wrapRef.current && (
+          <ReactionPicker
+            anchor={wrapRef.current}
+            alignRight={mine}
+            current={myReaction}
+            onPick={e => { onReact(m, myReaction === e ? null : e); setPickerOpen(false) }}
+            onClose={() => setPickerOpen(false)}
+          />
         )}
 
         <div className={`cx-bubble ${m.is_important ? 'important' : ''} ${m.deleted ? 'deleted' : ''}`}>
@@ -133,7 +138,6 @@ function MessageItem({
               <button
                 key={emoji}
                 className={`cx-reaction ${ids.includes(meId) ? 'mine' : ''}`}
-                title={ids.includes(meId) ? 'Click to remove your reaction' : 'React with this'}
                 onClick={() => onReact(m, ids.includes(meId) ? null : emoji)}
               >
                 {emoji}<span>{ids.length}</span>
@@ -143,6 +147,67 @@ function MessageItem({
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * Emoji picker rendered in a fixed-position portal so the chat pane's scroll
+ * container can never clip it. Opens above the bubble (below when there is no
+ * room), aligned to the bubble's inner edge and clamped to the viewport.
+ */
+function ReactionPicker({ anchor, alignRight, current, onPick, onClose }: {
+  anchor: HTMLElement; alignRight: boolean; current: string | null
+  onPick: (emoji: string) => void; onClose: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const a = anchor.getBoundingClientRect()
+    const w = el.offsetWidth
+    const h = el.offsetHeight
+    const margin = 8
+    let top = a.top - h - 6
+    if (top < margin + 64) top = a.bottom + 6 // no room above (under the top bar)
+    let left = alignRight ? a.right - w : a.left
+    left = Math.max(margin, Math.min(left, window.innerWidth - w - margin))
+    top = Math.max(margin, Math.min(top, window.innerHeight - h - margin))
+    setPos({ top, left })
+  }, [anchor, alignRight])
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current?.contains(e.target as Node) || anchor.contains(e.target as Node)) return
+      onClose()
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onScroll = (e: Event) => { if (!ref.current?.contains(e.target as Node)) onClose() }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onClose)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onClose)
+    }
+  }, [anchor, onClose])
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="cx-picker"
+      role="menu"
+      style={pos ? { top: pos.top, left: pos.left } : { top: -9999, left: -9999 }}
+    >
+      {QUICK_REACTIONS.map(e => (
+        <button key={e} aria-label={`React ${e}`} className={current === e ? 'active' : ''} onClick={() => onPick(e)}>{e}</button>
+      ))}
+    </div>,
+    document.body,
   )
 }
 
