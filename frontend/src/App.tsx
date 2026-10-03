@@ -19,6 +19,7 @@ import QuizGenerationPage from '@/pages/rag/QuizGenerationPage'
 import PaperStylePage from '@/pages/rag/PaperStylePage'
 import SchedulerPage from '@/pages/scheduler/SchedulerPage'
 import NoticeBoardPage from '@/pages/notices/NoticeBoardPage'
+import ChatPage from '@/pages/chat/ChatPage'
 import ManageUsersPage from '@/pages/admin/ManageUsersPage'
 import ManageCoursesPage from '@/pages/admin/ManageCoursesPage'
 
@@ -52,6 +53,8 @@ export default function App() {
               } />
               <Route path="/scheduler" element={<SchedulerPage />} />
               <Route path="/notices" element={<NoticeBoardPage />} />
+              <Route path="/chat" element={<ChatPage />} />
+              <Route path="/chat/:groupId" element={<ChatPage />} />
               <Route path="/admin/users" element={
                 <RoleRoute roles={['admin']}><ManageUsersPage /></RoleRoute>
               } />

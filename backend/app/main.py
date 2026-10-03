@@ -14,7 +14,7 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 from app.config import get_settings
-from app.routers import auth, users, courses, classroom, scheduler, notices, rag
+from app.routers import auth, users, courses, classroom, scheduler, notices, rag, chat
 
 
 @asynccontextmanager
@@ -79,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(scheduler.router, prefix="/api/scheduler", tags=["Scheduler"])
     app.include_router(notices.router, prefix="/api/notices", tags=["Notice Board"])
     app.include_router(rag.router, prefix="/api/rag", tags=["RAG Engine"])
+    app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 
     # --- Health Check ---
     @app.get("/api/health", tags=["System"])

@@ -90,7 +90,10 @@ class Settings(BaseSettings):
     BUCKET_SUBMISSIONS: str = "submissions"
     BUCKET_AVATARS: str = "avatars"
     BUCKET_STUDENT_MATERIALS: str = "student-materials"
+    BUCKET_CHAT: str = "chat-media"
     SIGNED_URL_TTL_SECONDS: int = 3600
+    # Chat media links live longer: a chat tab stays open for hours.
+    CHAT_SIGNED_URL_TTL_SECONDS: int = 6 * 3600
     MAX_UPLOAD_MB: int = 50
 
     # ── Application ─────────────────────────────────────────────────────────
