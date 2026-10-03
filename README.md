@@ -92,6 +92,29 @@ Run the backend and frontend as two services.
 
 If `VITE_API_URL` is missing or wrong, API calls hit the frontend itself and get `index.html` back; the app now rejects that and logs `Expected JSON ... but got HTML` in the browser console.
 
+## Chat (Teams/WhatsApp-style)
+
+Sidebar → **Chat**, for every role.
+
+| | Admin | Teacher | Student |
+|---|---|---|---|
+| Create groups | ✅ | ✅ | ❌ |
+| Find/add people | everyone | only people enrolled in courses of the semester(s) they teach | ❌ (sees only groups they were added to) |
+| Send text/files/polls | ✅ | ✅ | only in groups set to **Everyone can send** |
+| React with emoji, vote in polls | ✅ | ✅ | ✅ |
+| Mark message important, change settings, add/remove members | group admins (teachers/admins in the group) | | |
+| Delete message | own + any (group admin) | own + any (group admin) | own |
+
+Each group has a **"Who can send messages"** setting: *Teachers/admins only* (announcement channel) or *Everyone can send* (discussion group). It can be changed any time from Group info.
+
+Features: text with links, images/videos/files (up to `MAX_UPLOAD_MB`, stored in the private `chat-media` bucket and served by signed URLs), polls (single/multiple choice, close poll), WhatsApp-style reactions, *Important* messages, unread badges, typing indicator, toasts for new messages.
+
+**Real-time:** the backend exposes a WebSocket at `/api/chat/ws` (the token is sent in the first frame, not the URL). Writes go through REST and are then pushed to every member's open sockets. Railway supports WebSockets with no extra configuration. The frontend derives `wss://…` from `VITE_API_URL` and pings every 25 s, reconnects with backoff, and refetches after reconnecting, so nothing is lost if a connection drops.
+
+> Run the backend as **one replica / one uvicorn worker** (the Railway default). Connections are tracked in memory; with several replicas, messages still arrive but only after a refresh/reconnect.
+
+**Database:** `supabase/migrations/006_chat.sql` (tables `chat_groups`, `chat_members`, `chat_messages`, `chat_reactions`, `chat_poll_votes`, function `chat_group_summaries`, bucket `chat-media`). Apply with `python -m scripts.migrate --force 006_chat.sql`.
+
 ## Demo accounts
 
 Password for all: `password123`

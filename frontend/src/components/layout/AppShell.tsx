@@ -4,6 +4,7 @@
 // ============================================================
 import { Outlet, Navigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
+import { ChatProvider } from '@/contexts/ChatContext'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 
@@ -33,12 +34,14 @@ export default function AppShell() {
   }
 
   return (
-    <div className="app-shell">
-      <Sidebar />
-      <TopBar />
-      <main className="app-main">
-        <Outlet />
-      </main>
-    </div>
+    <ChatProvider>
+      <div className="app-shell">
+        <Sidebar />
+        <TopBar />
+        <main className="app-main">
+          <Outlet />
+        </main>
+      </div>
+    </ChatProvider>
   )
 }

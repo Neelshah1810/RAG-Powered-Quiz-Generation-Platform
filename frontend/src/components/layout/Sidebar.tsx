@@ -4,15 +4,17 @@
 // ============================================================
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
+import { useChat } from '@/contexts/ChatContext'
 import {
   LayoutDashboard, Sparkles, BookOpen, Calendar,
-  Bell, Users, GraduationCap, FileText
+  Bell, Users, GraduationCap, FileText, MessagesSquare
 } from 'lucide-react'
 
 const teacherNav = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/paper-style', label: 'Paper Style', icon: Sparkles },
   { to: '/classroom', label: 'Classroom', icon: BookOpen },
+  { to: '/chat', label: 'Chat', icon: MessagesSquare },
   { to: '/scheduler', label: 'Scheduler', icon: Calendar },
   { to: '/notices', label: 'Notice Board', icon: Bell },
 ]
@@ -21,6 +23,7 @@ const studentNav = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/quiz', label: 'Quiz Generation', icon: Sparkles },
   { to: '/classroom', label: 'Classroom', icon: BookOpen },
+  { to: '/chat', label: 'Chat', icon: MessagesSquare },
   { to: '/scheduler', label: 'Scheduler', icon: Calendar },
   { to: '/notices', label: 'Notice Board', icon: Bell },
 ]
@@ -29,6 +32,7 @@ const adminNav = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/paper-style', label: 'Paper Style', icon: Sparkles },
   { to: '/classroom', label: 'Classroom', icon: BookOpen },
+  { to: '/chat', label: 'Chat', icon: MessagesSquare },
   { to: '/admin/users', label: 'Manage Users', icon: Users },
   { to: '/admin/courses', label: 'Manage Courses', icon: GraduationCap },
   { to: '/scheduler', label: 'Scheduler', icon: Calendar },
@@ -37,6 +41,7 @@ const adminNav = [
 
 export default function Sidebar() {
   const { user } = useAuth()
+  const { totalUnread } = useChat()
 
   const navItems =
     user?.role === 'admin' ? adminNav :
@@ -62,6 +67,9 @@ export default function Sidebar() {
           >
             <item.icon size={20} className="nav-icon" />
             <span>{item.label}</span>
+            {item.to === '/chat' && totalUnread > 0 && (
+              <span className="cx-unread cx-nav-badge">{totalUnread > 99 ? '99+' : totalUnread}</span>
+            )}
           </NavLink>
         ))}
       </nav>
