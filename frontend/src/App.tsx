@@ -44,8 +44,12 @@ export default function App() {
               <Route path="/classroom" element={<ClassroomPage />} />
               <Route path="/classroom/:courseId" element={<CoursePage />} />
               <Route path="/classroom/:courseId/assignment/:assignmentId" element={<AssignmentPage />} />
-              <Route path="/quiz" element={<QuizGenerationPage />} />
-              <Route path="/paper-style" element={<PaperStylePage />} />
+              <Route path="/quiz" element={
+                <RoleRoute roles={['student']}><QuizGenerationPage /></RoleRoute>
+              } />
+              <Route path="/paper-style" element={
+                <RoleRoute roles={['teacher', 'admin']}><PaperStylePage /></RoleRoute>
+              } />
               <Route path="/scheduler" element={<SchedulerPage />} />
               <Route path="/notices" element={<NoticeBoardPage />} />
               <Route path="/admin/users" element={

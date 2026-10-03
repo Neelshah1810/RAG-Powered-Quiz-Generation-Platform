@@ -41,7 +41,8 @@ export default function Sidebar() {
   const navItems =
     user?.role === 'admin' ? adminNav :
     user?.role === 'teacher' ? teacherNav :
-    studentNav
+    user?.role === 'student' ? studentNav :
+    []
 
   return (
     <aside className="app-sidebar">
@@ -78,7 +79,7 @@ export default function Sidebar() {
         </div>
         <div style={{ overflow: 'hidden', flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {user?.full_name}
+            {user?.full_name || user?.email?.split('@')[0] || 'User'}
           </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-3)', textTransform: 'capitalize' }}>
             {user?.role}

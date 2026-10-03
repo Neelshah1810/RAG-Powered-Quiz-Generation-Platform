@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
     # Comma-separated extra origins allowed by CORS, for staging/production.
     EXTRA_CORS_ORIGINS: str = ""
+    # Origins matching this regex are also allowed. Defaults to Railway's
+    # generated domains so a redeploy under a new subdomain keeps working.
+    # Auth is a bearer token, not a cookie, so this does not expose sessions.
+    CORS_ORIGIN_REGEX: str = r"https://[a-z0-9-]+\.up\.railway\.app"
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
 
@@ -128,6 +132,8 @@ class Settings(BaseSettings):
             self.FRONTEND_URL,
             "http://localhost:5173",
             "http://127.0.0.1:5173",
+            "http://localhost:4173",  # vite preview
+            "http://localhost:3000",
         ]
         candidates += [o.strip() for o in self.EXTRA_CORS_ORIGINS.split(",")]
         seen: set[str] = set()
